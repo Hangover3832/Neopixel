@@ -1,11 +1,12 @@
-from typing import Literal
+from typing import Any, Literal
 import gpiozero # type: ignore
 from spidev import SpiDev # type: ignore
-from neopixel_classes import OutputDevice, Spi_Clock, Spi_Bit_Encoding
+from neopixel_classes import OutputDevice, Spi_Clock
 import numpy as np
 from numpy.typing import NDArray
-from neopixel_classes import Neopixel, NoOutputDevice, SPIDevice
-from colors import PixelOrder, ColorMode
+from devices import SPIDevice
+from colors import PixelOrder
+
 
 class GPIOzeroOutputDevice(OutputDevice):
 
@@ -20,7 +21,7 @@ class GPIOzeroOutputDevice(OutputDevice):
         self.device.off()
 
     @property
-    def enabled(self) -> bool:
+    def value(self) -> Any:
         return self.device.value
 
 #-----------------------------------------------------------
@@ -50,9 +51,11 @@ class RpiSpiDev(SPIDevice):
         except: 
             raise RuntimeError("Error: Could not open SPI device. Ensure SPI is enabled in raspi-config and the device number is correct.")
 
-        self._cs = custom_cs or NoOutputDevice()
+        self._cs = custom_cs
 
-    def write_to_device(self, buffer: NDArray[np.uint8]) -> None:
+    def write_to_device(self, buffer: NDArray[np.float32]) -> int:
         super().write_to_device(buffer)
         assert self._spi_buffer is not None
         self._spi.writebytes2(self._spi_buffer.T.flatten())
+        return 0
+    

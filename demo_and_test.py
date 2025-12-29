@@ -1,11 +1,14 @@
 from time import sleep, monotonic
 from matplotlib import axis
 import numpy as np
-from neopixel_classes import Neopixel, ConsoleSimulationDevice
+from numpy.typing import NDArray
+from neopixel_classes import Neopixel
+from devices import ConsoleSimulationDevice, NeopixelDevice
 from colors import ColorMode, PixelOrder, create_gamma_function, G, SOME_COLORS
 from every import Every # https://raw.githubusercontent.com/Hangover3832/every_timer/refs/heads/main/every.py
 from random import random, randint
 from effects import Fire, Meteor
+
 
 try:
     from rpi_devices import GPIOzeroOutputDevice, RpiSpiDev
@@ -26,6 +29,22 @@ except ModuleNotFoundError:
     CS2 = None
     neo1 = ConsoleSimulationDevice(pixel_order=PixelOrder.GRB)
     neo2 = ConsoleSimulationDevice(pixel_order=PixelOrder.GRBW)
+
+
+#------------------------------------------------------------------------------
+class CustomDevice(NeopixelDevice):
+    """Example how to implement a custom Neopixel device and passing custom parameters.
+    This one simply prints content of the whole 8bit RGB array"""
+    def write_to_device(self, buffer:NDArray[np.float32]) -> int:
+        print("example Neopixel device implementaion")
+        print(f"There are {self.neopixel.num_pixels} {self.pixel_order.name} pixels")
+        print(f"{self.kwargs=}")
+        print(self._to_uint8(buffer))
+        return 0
+
+Neopixel(num := 10, color_mode=ColorMode.RGB).to(CustomDevice(pixel_order=PixelOrder.RGBW, param1=1234, param2=5678)).set_value(0, np.random.rand(num, 4))()
+#------------------------------------------------------------------------------
+
 
 
 def basic_tests():
@@ -218,6 +237,7 @@ def meteor_shower():
 
 
 if __name__ == "__main__":
+    quit()
     basic_tests()
 
     # One line to rule them all:

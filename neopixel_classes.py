@@ -1,7 +1,7 @@
 from __future__ import annotations
 from abc import ABC, abstractmethod
 from enum import Enum
-from typing import Callable, Literal
+from typing import Any, Callable, Literal
 import numpy as np
 from numpy.typing import NDArray
 from colors import ColorMode, PixelOrder, G
@@ -30,14 +30,14 @@ class OutputDevice:
         super().__init__()
 
     @abstractmethod
-    def enable(self):
+    def enable(self) -> Any:
         raise NotImplementedError
     
     @abstractmethod
-    def disable(self):
+    def disable(self) -> Any:
         raise NotImplementedError
 
-    def set_neopixel(self, neopixel: Neopixel) -> None:
+    def set_neopixel(self, neopixel:Neopixel) -> None:
         self._neopixel = neopixel
 
     @property
@@ -49,23 +49,9 @@ class OutputDevice:
     def neopixel(self) -> Neopixel | None:
         return self._neopixel
 
-
-#-----------------------------------------------------------
-class NoOutputDevice(OutputDevice):
-    """Dummy output device when custom chip select is not used"""
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-        self._enabled: bool = False
-
-    def enable(self):
-        self._enabled = True
-
-    def disable(self):
-        self._enabled = False
-
-    @property
-    def is_active(self) -> bool:
-        return self._enabled
+    @neopixel.setter
+    def neopixel(self, neopixel:Neopixel) -> None:
+        self.set_neopixel(neopixel=neopixel)
 
 
 #-----------------------------------------------------------
@@ -76,12 +62,20 @@ class NeopixelDevice(ABC):
         self._pixel_order: PixelOrder = pixel_order
         self.is_simulated: bool = False
         self._cs = custom_cs
+        self.kwargs = kwargs
     
-    @abstractmethod
-    def write_to_device(self, buffer:NDArray[np.uint8]):
-        raise NotImplementedError
 
-    def write_bytes(self, buffer:NDArray[np.uint8]) -> None:
+    @abstractmethod
+    def write_to_device(self, buffer:NDArray[np.float32]) -> Any:
+        raise NotImplementedError
+    
+
+    def _to_uint8(self, buffer:NDArray[np.float32]) -> NDArray[np.uint8]:
+        # scale to [0, 255], and convert to uint8:
+        return np.clip(np.round(255 * buffer), 0, 255).astype(np.uint8)
+
+
+    def _write_bytes(self, buffer:NDArray[np.float32]) -> Any:
         if self._cs is not None:
             self._cs.enable()
 
@@ -93,13 +87,14 @@ class NeopixelDevice(ABC):
         if self._cs is not None:
             self._cs.disable()
 
-    def close(self) -> None:
-        pass
+    def open_(self) -> Any:
+        return
 
+    def close_(self) -> Any:
+        return
 
     def set_neopixel(self, neopixel: Neopixel) -> None:
         self._neopixel = neopixel
-
 
     @property
     def pixel_order(self) -> PixelOrder:
@@ -108,121 +103,12 @@ class NeopixelDevice(ABC):
     @property
     def neopixel(self) -> Neopixel:
         if self._neopixel is None:
-            raise ValueError("`neopixel` attribute not set. Use the method `set_neopixel()`")
-
+            raise ValueError("`neopixel` attribute not set.")
         return self._neopixel
- 
-
-#-----------------------------------------------------------
-class SPIDevice(NeopixelDevice):
-
-    def __init__(self, *, pixel_order:PixelOrder, custom_cs:OutputDevice | None = None, **kwargs) -> None:
-        super().__init__(pixel_order=pixel_order, custom_cs=custom_cs, **kwargs)
-        self._spi_buffer: NDArray[np.uint8] | None = None
-
-
-    def set_neopixel(self, neopixel: Neopixel):
-        super().set_neopixel(neopixel)
-        # assert self.neopixel is not None
-        
-        if self._pixel_order.num == 4:
-            self._double_bits_per_pixel = 16
-            self._msb_mask = 0x80000000
-            self._c_mask = 0xFFFFFFFF
-        else:
-            self._double_bits_per_pixel = 12
-            self._msb_mask = 0x800000
-            self._c_mask = 0xFFFFFF
-
-        # Pre-allocate buffer for the encoded bits
-        self._spi_buffer = self._spi_buffer = np.zeros([self._double_bits_per_pixel, self.neopixel.num_pixels], dtype=np.uint8)
-
-
-    def write_to_device(self, buffer: NDArray[np.uint8]):
-        if self.neopixel is None or self._spi_buffer is None:
-            raise ValueError("Attribute `neopixel` is not set")
-
-        if buffer.ndim != 2:
-            raise ValueError("buffer must be 2D [n, [r,g,b,(w)]]")
-
-        rgb_buffer = buffer.copy()
-
-        # Convert [r, g, b, (w)] to uint32:
-        if self.neopixel.has_W:
-            rgb_buffer = rgb_buffer * np.array([0x1_00_00_00, 0x1_00_00, 0x1_00, 1], dtype=np.uint32)
-        else:
-            rgb_buffer = rgb_buffer * np.array([0x1_00_00, 0x1_00, 1], dtype=np.uint32)
-
-        # reduce the array to a single uint32 per pixel:
-        rgb_buffer = np.bitwise_or.reduce(rgb_buffer, axis=1, dtype=np.uint32)
-
-        # shift out 2 bits of each pixel and encode them to a byte for SPI transmission:
-        for i in range(self._double_bits_per_pixel):
-            bit1 = (rgb_buffer & self._msb_mask).astype(bool)
-            rgb_buffer = ((rgb_buffer << 1) & self._c_mask).astype(np.uint32)
-            bit2 = (rgb_buffer & self._msb_mask).astype(bool) 
-            rgb_buffer = ((rgb_buffer << 1) & self._c_mask).astype(np.uint32)
-            # encode 2 pixel bits into 1 SPI byte:
-            self._spi_buffer[i] = (np.where(
-                        bit1, Spi_Bit_Encoding.SPI_HIGH_BIT.value,  Spi_Bit_Encoding.SPI_LOW_BIT.value
-                        ) | np.where(
-                        bit2, Spi_Bit_Encoding.SPI_HIGH_BIT2.value, Spi_Bit_Encoding.SPI_LOW_BIT2.value)
-                    ).astype(np.uint8)
-            
-        # self._buffer is now ready to be used by the child class
-
-
-#-----------------------------------------------------------
-class ConsoleSimulationDevice(NeopixelDevice):
-
-    LED_CHAR = "\u25CF"
-
-    def __init__(self, *, pixel_order:PixelOrder, **kwargs) -> None:
-        super().__init__(pixel_order=pixel_order, custom_cs=None, **kwargs)
-        self.is_simulated = True
-
-    def write_to_device(self, buffer:NDArray[np.uint8]):
-        print('', end='\r')
-        for value in buffer:
-            g, r, b = value[:3]
-            w = value[3] if len(value) > 3 else 0
-            print(f"\033[48;2;{w};{w};{w}m", end='') # the background color simulates the white LED in a GRBW Neopixel
-            print(f"\033[38;2;{r};{g};{b}m{self.LED_CHAR}\033[0m", end='', flush=True) # print the LEDs
-
-
-#-----------------------------------------------------------
-class ConsoleSimulationSPIDevice(SPIDevice):
-
-    LED_CHAR = "\u25CF"
-
-    def __init__(self, *, pixel_order:PixelOrder, **kwargs) -> None:
-        super().__init__(pixel_order=pixel_order, custom_cs=None, **kwargs)
-        self.is_simulated = True
-
-    def write_to_device(self, buffer:NDArray[np.uint8]) -> None:
-        super().write_to_device(buffer)
-        assert self._spi_buffer is not None
-        buffer = self._spi_buffer.T.flatten()
-
-        if self.neopixel is None:
-            raise ValueError("Attribute `neopixel` is not set")
-
-        def convert(bits: np.ndarray) -> int:
-            # bits = np.ndarray[uint8, uitn8, uint8, uint8] = 4 double bits = 8 bits = 1 byte
-            bit_values = {0xCC: 0b11, 0xC8: 0b10, 0x8C: 0b01, 0x88: 0b00} # SPI encodings {1byte: 2bits}
-            result = 0
-            for bit in bits:
-                result = (result << 2) | bit_values[bit] # shift 2 bits and inject 2 new bits
-            return result
-
-        double_bits_per_pixel = 12 if len(self._pixel_order.name) == 3 else 16 # check if is GRB or GRBW...
-        buffer = buffer.reshape([buffer.shape[0]//double_bits_per_pixel, double_bits_per_pixel]) # ...and reshape the buffer accordingly
-        print('', end='\r')
-        for bits in buffer: 
-            g, r, b = convert(bits[0:4]), convert(bits[4:8]), convert(bits[8:12])
-            w = convert(bits[12:16]) if bits.shape[0]>12 else 0
-            print(f"\033[48;2;{w};{w};{w}m", end='') # the background color simulates the white LED in a GRBW Neopixel
-            print(f"\033[38;2;{r};{g};{b}m{self.LED_CHAR}\033[0m", end='', flush=True) # print the LEDs
+    
+    @neopixel.setter
+    def neopixel(self, neopixel:Neopixel) -> None:
+        self.set_neopixel(neopixel)
 
 
 #-----------------------------------------------------------
@@ -251,7 +137,6 @@ class Neopixel:
         # Private attributes
         # self._pixel_order: PixelOrder = pixel_order
         self._color_mode: ColorMode = color_mode
-        self._num_lit_pixels: int = 0
         self._current_power: float = 0.0
         self._max_power: float = max_power
         self._index: int = 0
@@ -267,7 +152,7 @@ class Neopixel:
     def to(self, device: NeopixelDevice) -> 'Neopixel':
         self._device = device
         self._pixel_buffer = np.zeros((self._num_pixels, device.pixel_order.num), dtype=np.float32)
-        self._device.set_neopixel(self)
+        self._device.neopixel = self
         return self
 
 
@@ -346,17 +231,11 @@ class Neopixel:
             rgb_buffer *= self._max_power/self._current_power
             self._current_power = self._max_power
 
-        # scale to [0, 255], and convert to uint8:
-        rgb_buffer = np.clip(np.round(255 * rgb_buffer), 0, 255).astype(np.uint8)
-        self._num_lit_pixels = int(np.count_nonzero(np.max(rgb_buffer, axis=1)))
-
-        # rows are now pixels, columns are R,G,B,(W)
-
         if self.reversed:
             rgb_buffer = rgb_buffer[::-1]
 
         # Send data to device:
-        self.device.write_bytes(rgb_buffer)
+        self.device._write_bytes(rgb_buffer)
 
 
     def __setitem__(self, index: int | slice, value: PixelValue) -> None:
@@ -624,11 +503,6 @@ class Neopixel:
     def num_pixels(self) -> int:
         """Get the number of pixels in the strip."""
         return self.__len__()
-
-    @property 
-    def num_lit_pixels(self) -> int:
-        """Get the number of lit pixels in the strip."""
-        return self._num_lit_pixels
 
     @property
     def power_consumption(self) -> float:
