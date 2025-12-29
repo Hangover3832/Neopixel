@@ -88,7 +88,7 @@ class ConsoleSimulationDevice(NeopixelDevice):
 
     def write_to_device(self, buffer:NDArray[np.float32]) -> int:
         print('', end='\r')
-        for value in buffer:
+        for value in (_ := self._to_uint8(buffer)):
             g, r, b = value[:3]
             w = value[3] if len(value) > 3 else 0
             print(f"\033[48;2;{w};{w};{w}m", end='') # the background color simulates the white LED in a GRBW Neopixel

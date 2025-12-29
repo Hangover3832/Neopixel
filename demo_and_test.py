@@ -237,18 +237,23 @@ def meteor_shower():
 
 
 if __name__ == "__main__":
-    quit()
     basic_tests()
 
     # One line to rule them all:
     Neopixel(1).to(ConsoleSimulationDevice(pixel_order=PixelOrder.GRB)).set_value(0, (1.0, 0.0, 0.0, 0.0), color_mode=ColorMode.RGB)()
+    print()
 
     GammaTest()
+    print()
     ColorModeTest()
+    print()
     power_measure()
+    print()
 
     Neopixel(23).to(neo1).clear()()
     Neopixel(150).to(neo2).clear()()
+
+    print()
 
     # light_show()
     fire()
