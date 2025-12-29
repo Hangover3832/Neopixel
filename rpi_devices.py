@@ -30,7 +30,7 @@ class RpiSpiDev(SPIDevice):
     def __init__(self, 
                  *, 
                  device:Literal[0, 1], 
-                 pixel_order: PixelOrder,
+                 pixel_order: PixelOrder = PixelOrder.GRB,
                  clock_rate:Spi_Clock=Spi_Clock.CLOCK_800KHZ, 
                  custom_cs:OutputDevice | None = None,
                  **kwargs) -> None:

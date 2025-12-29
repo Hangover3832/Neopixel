@@ -1,4 +1,4 @@
-from typing import Callable, Tuple
+from typing import Callable
 import numpy as np
 from numpy.polynomial import Polynomial as Poly
 from enum import Enum, auto
@@ -67,7 +67,9 @@ class ColorMode(Enum):
         if function and callable(function):
             return function(value) # type: ignore
 
-        raise NotImplementedError(f"{self.name} to {to_mode.name} is not implemented: '{convert_function}()'")
+        raise NotImplementedError(
+            f"{self.name} to {to_mode.name} is not implemented: `{convert_function}({self.name.lower()}:NDArray[np.float32]) -> NDArray[np.float32]`"
+            )
 
 
 class PixelOrder(Enum):

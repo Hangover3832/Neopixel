@@ -1,5 +1,3 @@
-from time import sleep, monotonic
-from matplotlib import axis
 import numpy as np
 from numpy.typing import NDArray
 from neopixel_classes import Neopixel
@@ -15,8 +13,8 @@ try:
 
     CS1 = None # GPIOzeroOutputDevice(bcm_pin=12) # use bcm_pin 12 for chip select
     CS2 = None # GPIOzeroOutputDevice(bcm_pin=13) # use bcm_pin 12 for chip select
-    neo1 = RpiSpiDev(device=0, custom_cs=CS1, pixel_order=PixelOrder.GRB)
-    neo2 = RpiSpiDev(device=1, custom_cs=CS2, pixel_order=PixelOrder.GRBW)
+    neo1dev = RpiSpiDev(device=0, custom_cs=CS1)
+    neo2dev = RpiSpiDev(device=1, custom_cs=CS2, pixel_order=PixelOrder.GRBW)
 
 except ModuleNotFoundError:
     print("""
@@ -27,14 +25,14 @@ except ModuleNotFoundError:
 
     CS1 = None
     CS2 = None
-    neo1 = ConsoleSimulationDevice(pixel_order=PixelOrder.GRB)
-    neo2 = ConsoleSimulationDevice(pixel_order=PixelOrder.GRBW)
+    neo1dev = ConsoleSimulationDevice()
+    neo2dev = ConsoleSimulationDevice(pixel_order=PixelOrder.GRBW)
 
 
 #------------------------------------------------------------------------------
 class CustomDevice(NeopixelDevice):
     """Example how to implement a custom Neopixel device and passing custom parameters.
-    This one simply prints content of the whole 8bit RGB array"""
+    This one simply prints the content of the whole 8bit RGB array"""
     def write_to_device(self, buffer:NDArray[np.float32]) -> int:
         print("example Neopixel device implementaion")
         print(f"There are {self.neopixel.num_pixels} {self.pixel_order.name} pixels")
@@ -42,14 +40,12 @@ class CustomDevice(NeopixelDevice):
         print(self._to_uint8(buffer))
         return 0
 
-Neopixel(num := 10, color_mode=ColorMode.RGB).to(CustomDevice(pixel_order=PixelOrder.RGBW, param1=1234, param2=5678)).set_value(0, np.random.rand(num, 4))()
+Neopixel(num := 1000, color_mode=ColorMode.RGB).to(CustomDevice(param1=1234, param2=5678)).set_value(0, np.random.rand(num, 4))()
 #------------------------------------------------------------------------------
 
-
-
 def basic_tests():
-    n1 = Neopixel(10, color_mode=ColorMode.RGB).to(neo1)
-    n2 = Neopixel(10, color_mode=ColorMode.RGB).to(neo2)
+    n1 = Neopixel(10).to(neo1dev)
+    n2 = Neopixel(10).to(neo2dev)
     
     n1[:] = 0.3
     n1[0] = 0.2, 0.3, 0.4
@@ -121,7 +117,7 @@ def ColorModeTest():
 
 def GammaTest() -> None:
 
-    neo = Neopixel(150).to(neo2)
+    neo = Neopixel(150).to(neo2dev)
     # Create a brightness gradient
     for i in neo:
         neo[i] = 0.0, 0.0, i/(neo.num_pixels-1)
@@ -188,7 +184,7 @@ def Raindrops(neo: Neopixel):
 
 
 def light_show():
-    neo = Neopixel(150).to(neo2)
+    neo = Neopixel(150).to(neo2dev)
     while True:
         Rainbow(neo)
         Raindrops(neo)
@@ -197,7 +193,7 @@ def light_show():
 
 def power_measure():
     lin_gamma = create_gamma_function(np.array([0.0, 1.0]))
-    neo = Neopixel(100, color_mode=ColorMode.RGB, gamma_func=lin_gamma).to(neo2)
+    neo = Neopixel(100, color_mode=ColorMode.RGB, gamma_func=lin_gamma).to(neo2dev)
     neo.watts_per_led = np.array([0.042, 0.042, 0.042, 0.084])
     neo[:] = 1.0, 1.0, 1.0, 1.0
     neo().clear()()
@@ -206,7 +202,7 @@ def power_measure():
 
 def fire():
     candle1 = Fire(
-        Neopixel(23, brightness=0.25).to(neo1),
+        Neopixel(23, brightness=0.25).to(neo1dev),
         spectrum=(0.8, 0.0),
         decay_factor=(0.95, 0.85),
         spark_interval_factor=0.05,
@@ -214,7 +210,7 @@ def fire():
         )
 
     candle2 = Fire(
-        Neopixel(23, brightness=1.0).to(neo2),
+        Neopixel(23, brightness=1.0).to(neo2dev),
         #spectrum=(1.0, 0.0),
         #decay_factor=(0.95, 0.85),
         #spark_interval_factor=0.15,
@@ -228,7 +224,7 @@ def fire():
 
 
 def meteor_shower():
-    meteor = Meteor(Neopixel(23, brightness=1.0).to(neo1), 
+    meteor = Meteor(Neopixel(23, brightness=1.0).to(neo1dev), 
                     decay_value=0.95, 
                     roll_interval=0.02
                     )
@@ -237,11 +233,14 @@ def meteor_shower():
 
 
 if __name__ == "__main__":
+    print()
     basic_tests()
 
     # One line to rule them all:
-    Neopixel(1).to(ConsoleSimulationDevice(pixel_order=PixelOrder.GRB)).set_value(0, (1.0, 0.0, 0.0, 0.0), color_mode=ColorMode.RGB)()
+    Neopixel(1).to(ConsoleSimulationDevice()).set_value(0, (1.0, 0.0, 0.0, 0.0), color_mode=ColorMode.RGB)()
     print()
+
+    device1 = CustomDevice()
 
     GammaTest()
     print()
@@ -250,8 +249,8 @@ if __name__ == "__main__":
     power_measure()
     print()
 
-    Neopixel(23).to(neo1).clear()()
-    Neopixel(150).to(neo2).clear()()
+    Neopixel(23).to(neo1dev).clear()()
+    Neopixel(150).to(neo2dev).clear()()
 
     print()
 

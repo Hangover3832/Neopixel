@@ -1,3 +1,4 @@
+from typing import Optional
 from numpy.typing import NDArray
 import numpy as np
 from neopixel_classes import OutputDevice, NeopixelDevice, Neopixel, Spi_Bit_Encoding
@@ -24,7 +25,7 @@ class _NoOutputDevice(OutputDevice):
 #-----------------------------------------------------------
 class SPIDevice(NeopixelDevice):
 
-    def __init__(self, *, pixel_order:PixelOrder, custom_cs:OutputDevice | None = None, **kwargs) -> None:
+    def __init__(self, *, pixel_order:PixelOrder=PixelOrder.GRB, custom_cs:OutputDevice | None = None, **kwargs) -> None:
         super().__init__(pixel_order=pixel_order, custom_cs=custom_cs, **kwargs)
         self._spi_buffer: NDArray[np.uint8] | None = None
 
@@ -82,7 +83,7 @@ class ConsoleSimulationDevice(NeopixelDevice):
 
     LED_CHAR = "\u25CF"
 
-    def __init__(self, *, pixel_order:PixelOrder, **kwargs) -> None:
+    def __init__(self, *, pixel_order:PixelOrder=PixelOrder.GRB, **kwargs) -> None:
         super().__init__(pixel_order=pixel_order, custom_cs=None, **kwargs)
         self.is_simulated = True
 
@@ -101,7 +102,7 @@ class ConsoleSimulationSPIDevice(SPIDevice):
 
     LED_CHAR = "\u25CF"
 
-    def __init__(self, *, pixel_order:PixelOrder, **kwargs) -> None:
+    def __init__(self, *, pixel_order:PixelOrder=PixelOrder.GRB, **kwargs) -> None:
         super().__init__(pixel_order=pixel_order, custom_cs=None, **kwargs)
         self.is_simulated = True
 

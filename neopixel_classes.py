@@ -1,7 +1,7 @@
 from __future__ import annotations
 from abc import ABC, abstractmethod
 from enum import Enum
-from typing import Any, Callable, Literal
+from typing import Any, Callable, Literal, Optional
 import numpy as np
 from numpy.typing import NDArray
 from colors import ColorMode, PixelOrder, G
@@ -56,14 +56,14 @@ class OutputDevice:
 
 #-----------------------------------------------------------
 class NeopixelDevice(ABC):
-    def __init__(self, *, pixel_order:PixelOrder, custom_cs:OutputDevice | None = None, **kwargs) -> None:
+    def __init__(self, *, pixel_order:PixelOrder = PixelOrder.GRB, custom_cs:OutputDevice | None = None, **kwargs) -> None:
         super().__init__()
         self._neopixel: Neopixel | None = None
-        self._pixel_order: PixelOrder = pixel_order
+        self._pixel_order: PixelOrder = pixel_order or PixelOrder.GRB
         self.is_simulated: bool = False
         self._cs = custom_cs
         self.kwargs = kwargs
-    
+
 
     @abstractmethod
     def write_to_device(self, buffer:NDArray[np.float32]) -> Any:
@@ -75,7 +75,7 @@ class NeopixelDevice(ABC):
         return np.clip(np.round(255 * buffer), 0, 255).astype(np.uint8)
 
 
-    def _write_bytes(self, buffer:NDArray[np.float32]) -> Any:
+    def _write_buffer(self, buffer:NDArray[np.float32]) -> Any:
         if self._cs is not None:
             self._cs.enable()
 
@@ -151,9 +151,11 @@ class Neopixel:
 
     def to(self, device: NeopixelDevice) -> 'Neopixel':
         self._device = device
-        self._pixel_buffer = np.zeros((self._num_pixels, device.pixel_order.num), dtype=np.float32)
         self._device.neopixel = self
-        return self
+        if self._pixel_buffer is None:
+            self._pixel_buffer = np.zeros((self._num_pixels, device.pixel_order.num), dtype=np.float32)
+            return self
+        return self.auto_show()
 
 
     def begin_update(self) -> 'Neopixel':
@@ -162,14 +164,14 @@ class Neopixel:
         return self
 
 
-    def end_update(self, force_update:bool=False) -> 'Neopixel':
+    def end_update(self, reset:bool=False) -> 'Neopixel':
         self._update_counter -= 1
 
-        if force_update or self._update_counter < 0:
+        if reset or self._update_counter < 0:
             self._update_counter = 0
 
         if self._update_counter <= 0:
-            self.auto_show()
+            return self.auto_show()
 
         return self
 
@@ -217,7 +219,7 @@ class Neopixel:
     def _write_buffer(self) -> None:
         """Write pixel data to the Neopixels device"""
 
-        rgb_buffer = self.pixel_buffer[:]
+        rgb_buffer = self.pixel_buffer.copy()
 
         # Apply brightness and gamma correction
         rgb_buffer = np.clip(self._gamma_func(rgb_buffer * self._brightness), 0.0, 1.0)
@@ -235,7 +237,7 @@ class Neopixel:
             rgb_buffer = rgb_buffer[::-1]
 
         # Send data to device:
-        self.device._write_bytes(rgb_buffer)
+        self.device._write_buffer(rgb_buffer)
 
 
     def __setitem__(self, index: int | slice, value: PixelValue) -> None:
