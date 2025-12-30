@@ -6,23 +6,6 @@ from colors import PixelOrder
 
 
 #-----------------------------------------------------------
-class _NoOutputDevice(OutputDevice):
-    """Dummy output device when custom chip select is not used"""
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-        self._enabled: bool = False
-
-    def enable(self):
-        self._enabled = True
-
-    def disable(self):
-        self._enabled = False
-
-    @property
-    def is_active(self) -> bool:
-        return self._enabled
-
-#-----------------------------------------------------------
 class SPIDevice(NeopixelDevice):
 
     def __init__(self, *, pixel_order:PixelOrder=PixelOrder.GRB, custom_cs:OutputDevice | None = None, **kwargs) -> None:

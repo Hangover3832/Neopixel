@@ -27,7 +27,20 @@ class OutputDevice:
     """Common abstract base class for digital switching output, used for custom chip select"""
 
     def __init__(self, *args, **kwargs) -> None:
-        super().__init__()
+        self.args: tuple = args
+        self.kwargs: dict = kwargs
+        self._neopixel_device: NeopixelDevice | None = None
+        self._is_open: bool = False
+
+    def open_(self) -> Any:
+        self._is_open = True
+    
+    def close_(self) -> Any:
+        self._is_open = False
+    
+    def __del__(self):
+        if self._is_open:
+            self.close_()
 
     @abstractmethod
     def enable(self) -> Any:
@@ -37,38 +50,37 @@ class OutputDevice:
     def disable(self) -> Any:
         raise NotImplementedError
 
-    def set_neopixel(self, neopixel:Neopixel) -> None:
-        self._neopixel = neopixel
+    def set_device(self, device:NeopixelDevice) -> None:
+        self._neopixel_device = device
 
     @property
-    @abstractmethod
-    def enabled(self) -> bool:
-        raise NotImplementedError
+    def device(self) -> NeopixelDevice | None:
+        return self._neopixel_device
 
-    @property
-    def neopixel(self) -> Neopixel | None:
-        return self._neopixel
-
-    @neopixel.setter
-    def neopixel(self, neopixel:Neopixel) -> None:
-        self.set_neopixel(neopixel=neopixel)
+    @device.setter
+    def device(self, device:NeopixelDevice) -> None:
+        self.set_device(device=device)
 
 
 #-----------------------------------------------------------
 class NeopixelDevice(ABC):
-    def __init__(self, *, pixel_order:PixelOrder = PixelOrder.GRB, custom_cs:OutputDevice | None = None, **kwargs) -> None:
+    def __init__(self, *args, pixel_order:PixelOrder = PixelOrder.GRB, custom_cs:OutputDevice | None = None, **kwargs) -> None:
         super().__init__()
         self._neopixel: Neopixel | None = None
-        self._pixel_order: PixelOrder = pixel_order or PixelOrder.GRB
+        self._pixel_order: PixelOrder = pixel_order
         self.is_simulated: bool = False
-        self._cs = custom_cs
-        self.kwargs = kwargs
+        self._cs: OutputDevice | None = custom_cs
+        self.args: tuple = args
+        self.kwargs: dict = kwargs
+        self._is_open: bool = False
+        if self._cs is not None:
+            self._cs.device = self
 
 
     @abstractmethod
     def write_to_device(self, buffer:NDArray[np.float32]) -> Any:
         raise NotImplementedError
-    
+
 
     def _to_uint8(self, buffer:NDArray[np.float32]) -> NDArray[np.uint8]:
         # scale to [0, 255], and convert to uint8:
@@ -76,22 +88,32 @@ class NeopixelDevice(ABC):
 
 
     def _write_buffer(self, buffer:NDArray[np.float32]) -> Any:
-        if self._cs is not None:
-            self._cs.enable()
 
         # rearange the rgb_buffer to the correct PixelOrder
         # Here, we allow every possible pixel order with R,G,B and optional W
         buffer = buffer[:, [self.pixel_order.name.index(c) for c in 'RGBW' if c in self.pixel_order.name]]
+
+        if self._cs is not None:
+            self._cs.enable()
+
         self.write_to_device(buffer)
 
         if self._cs is not None:
             self._cs.disable()
 
     def open_(self) -> Any:
-        return
+        if self._cs is not None:
+            self._cs.open_()
+        self._is_open = True
 
     def close_(self) -> Any:
-        return
+        if self._cs is not None:
+            self._cs.close_()
+        self._is_open = False
+
+    def __del__(self):
+        if self._is_open:
+            self.close_()
 
     def set_neopixel(self, neopixel: Neopixel) -> None:
         self._neopixel = neopixel
@@ -150,12 +172,13 @@ class Neopixel:
 
 
     def to(self, device: NeopixelDevice) -> 'Neopixel':
+        is_new = self._pixel_buffer is None
         self._device = device
-        self._device.neopixel = self
-        if self._pixel_buffer is None:
+        if is_new:
             self._pixel_buffer = np.zeros((self._num_pixels, device.pixel_order.num), dtype=np.float32)
-            return self
-        return self.auto_show()
+        self._device.neopixel = self
+        self._device.open_()
+        return self if is_new else self.auto_show()
 
 
     def begin_update(self) -> 'Neopixel':
@@ -286,9 +309,11 @@ class Neopixel:
             self.pixel_buffer[index, 3] = float(np.clip(value, 0.0, 1.0))
             return self.auto_show()
 
+        if (value.shape[-1] == 2) or (value.shape[-1] > 4):
+            raise ValueError("Wrong number of values")
+
         if (value.ndim == 2) and (isinstance(index, int)):
             index = slice(index, index+value.shape[0])
-        
         
         if value.shape[-1] == 1: # an array of single numbers is boradcasted to the white pixels only:
             if not self.has_W:
@@ -297,9 +322,6 @@ class Neopixel:
             
             self.pixel_buffer[index, -1] = value[:, 0]
             return self.auto_show()
-
-        if (value.shape[-1] == 2) or (value.shape[-1] > 4):
-            raise ValueError("Wrong number of values")
 
         rgb = (color_mode or self._color_mode).convert_to(value, ColorMode.RGB)
 
@@ -313,40 +335,14 @@ class Neopixel:
         return self.auto_show()
 
 
-
-
-    def next_value(self, value: PixelValue, color_mode: ColorMode | None = None) -> int:
+    def next_value(self, value: PixelValue, color_mode: ColorMode | None = None) -> 'Neopixel':
         """Set the value for the next pixel in the iteration"""
-        result = next(self)
-        self.set_value(result, value=value, color_mode=color_mode)
-        return result
+        return self.set_value(result := next(self), value=value, color_mode=color_mode)
 
     def fill(self, value: PixelValue, color_mode: ColorMode | None = None) -> 'Neopixel':
         """Fill all pixels with a given value"""
         return self.set_value(slice(None), value=value, color_mode=color_mode)
 
-    def __iadd__(self, value: np.ndarray | float) -> 'Neopixel':
-        """Add value to the pixel buffer in RGB space, e.g. pixels += 0.1"""
-        self._pixel_buffer =  np.clip(self.pixel_buffer + value, 0., 1.)
-        return self.auto_show()
-
-    def __imul__(self, value: np.ndarray | float) -> Neopixel:
-        """Multiply value with the pixel buffer in RGB space, e.g. neo *= 0.9"""
-        self._pixel_buffer = np.clip(self.pixel_buffer * value, 0., 1.)
-        return self.auto_show()
-
-    def __ilshift__(self, amount: int) -> 'Neopixel':
-        """roll to the left by amount, e.g. `pixels <<= 1`"""
-        return self.roll(-int(abs(amount)))
-    
-    def __irshift__(self, amount: int) -> 'Neopixel':
-        """roll to the right by amount, e.g. `pixels >>= 1`"""
-        return self.roll(int(abs(amount)))
-
-    def __invert__(self)-> 'Neopixel':
-        """Invert all colors of all pixels, e.g. `~pixels` """
-        self._pixel_buffer = 1.0 - self.pixel_buffer
-        return self.show() if self.auto_write else self
 
     def clear(self) -> 'Neopixel':
         """Clear all pixels by setting them to black."""
@@ -391,41 +387,6 @@ class Neopixel:
                 return self.set_value(slice(shift, None), value)
 
 
-    def __call__(self, index: PixelIndex | None = None, value: PixelValue | None = None) -> 'Neopixel':
-        """
-        Calls `show()` that updates the stripe if no index or value is provided. If index is provided but no value,
-        the pixel(s) at index gets cleared. If both index and value are provided, the pixel
-        at index is set to the specified value.
-
-        :param index: Pixel index number(s)
-        :type index: int or slice
-        :param value: Pixel value. 
-            If value is a number, it affects the White LED only in a RGBW stripe. A non RGBW stripe
-            will throw an exception in this case.
-        :type value: number or array like
-        """
-
-        if index is None:
-            return self.show()
-
-        if value is None:
-            return self.set_value(index, self.blank)
-
-        return self.set_value(index, value)
-
-
-    def __iter__(self) -> 'Neopixel':
-        return self
-
-    def __next__(self) -> int:
-        """ Iterate over the indices of the pixels. """
-        if self._index >= len(self):
-            self._index = 0
-            raise StopIteration
-        self._index += 1
-        return self._index - 1
-
-
     def create_gradient(self, 
                         from_value:PixelValue, 
                         to_value:PixelValue, 
@@ -458,6 +419,72 @@ class Neopixel:
     
         return self.set_value(index, gradient[:self.num_pixels-index], color_mode=color_mode)
 
+
+    def __call__(self, index: PixelIndex | None = None, value: PixelValue | None = None) -> 'Neopixel':
+        """
+        Calls `show()` that updates the stripe if no index or value is provided. If index is provided but no value,
+        the pixel(s) at index gets cleared. If both index and value are provided, the pixel
+        at index is set to the specified value.
+
+        :param index: Pixel index number(s)
+        :type index: int or slice
+        :param value: Pixel value. 
+            If value is a number, it affects the White LED only in a RGBW stripe. A non RGBW stripe
+            will throw an exception in this case.
+        :type value: number or array like
+        """
+
+        if index is None:
+            return self.show()
+
+        if value is None:
+            return self.set_value(index, self.blank)
+
+        return self.set_value(index, value)
+
+
+    # __dunder__ methods =============================
+
+    def __del__(self):
+        if self._device is not None:
+            self._device.close_()
+
+    def __iter__(self) -> 'Neopixel':
+        return self
+
+    def __next__(self) -> int:
+        """ Iterate over the indices of the pixels. """
+        if self._index >= len(self):
+            self._index = 0
+            raise StopIteration
+        self._index += 1
+        return self._index - 1
+
+    def __iadd__(self, value: np.ndarray | float) -> 'Neopixel':
+        """Add value to the pixel buffer in RGB space, e.g. pixels += 0.1"""
+        self._pixel_buffer =  np.clip(self.pixel_buffer + value, 0., 1.)
+        return self.auto_show()
+
+    def __imul__(self, value: np.ndarray | float) -> Neopixel:
+        """Multiply value with the pixel buffer in RGB space, e.g. neo *= 0.9"""
+        self._pixel_buffer = np.clip(self.pixel_buffer * value, 0., 1.)
+        return self.auto_show()
+
+    def __ilshift__(self, amount: int) -> 'Neopixel':
+        """roll to the left by amount, e.g. `pixels <<= 1`"""
+        return self.roll(-int(abs(amount)))
+    
+    def __irshift__(self, amount: int) -> 'Neopixel':
+        """roll to the right by amount, e.g. `pixels >>= 1`"""
+        return self.roll(int(abs(amount)))
+
+    def __invert__(self)-> 'Neopixel':
+        """Invert all colors of all pixels, e.g. `~pixels` """
+        self._pixel_buffer = 1.0 - self.pixel_buffer
+        return self.show() if self.auto_write else self
+
+
+    # properties =============================
 
     @property
     def blank(self) -> np.ndarray:
@@ -504,7 +531,7 @@ class Neopixel:
     @property
     def num_pixels(self) -> int:
         """Get the number of pixels in the strip."""
-        return self.__len__()
+        return len(self)
 
     @property
     def power_consumption(self) -> float:
