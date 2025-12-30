@@ -1,7 +1,8 @@
+from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 from neopixel_classes import Neopixel
-from devices import ConsoleSimulationDevice, NeopixelDevice
+from devices import ConsoleSimulationDevice, NeopixelDevice, OutputDevice
 from colors import ColorMode, PixelOrder, create_gamma_function, G, SOME_COLORS
 from every import Every # https://raw.githubusercontent.com/Hangover3832/every_timer/refs/heads/main/every.py
 from random import random, randint
@@ -29,24 +30,53 @@ except ModuleNotFoundError:
     neo2dev = ConsoleSimulationDevice(pixel_order=PixelOrder.GRBW)
 
 
-#------------------------------------------------------------------------------
-class CustomDevice(NeopixelDevice):
-    """Example how to implement a custom Neopixel device and passing custom parameters.
-    This one simply prints the content of the whole 8bit RGB array"""
-    def write_to_device(self, buffer:NDArray[np.float32]) -> int:
-        print("example Neopixel device implementaion")
-        print(f"There are {self.neopixel.num_pixels} {self.pixel_order.name} pixels")
-        print(f"{self.kwargs=}")
-        print(self._to_uint8(buffer))
-        return 0
+def test_custom_device():
 
-Neopixel(num := 1000, color_mode=ColorMode.RGB).to(CustomDevice(param1=1234, param2=5678)).set_value(0, np.random.rand(num, 4))()
-#------------------------------------------------------------------------------
+    class MyNeopixel(NeopixelDevice):
+        """Example how to implement a custom Neopixel device and passing custom parameters.
+        This one simply prints the content of the whole 8bit RGB array"""
+        def write_to_device(self, buffer:NDArray[np.float32]) -> int:
+            print("example Neopixel device implementaion")
+            print(f"There are {self.neopixel.num_pixels} {self.pixel_order.name} pixels")
+            print(f"{self.kwargs=}")
+            print(self._to_uint8(buffer))
+            return 0
+        
+        def open_(self) -> Any:
+            print(f"Opening Neopixel device...")
+            return super().open_()
+
+        def close_(self) -> Any:
+            print(f"Closing Neopixel device...")
+            return super().close_()
+
+
+    class MyChipSelect(OutputDevice):
+        def open_(self) -> Any:
+            print("Opening chip select device...")
+            return super().open_()
+
+        def close_(self) -> Any:
+            print("Closing chip select device...")
+            return super().close_()
+
+        def enable(self):
+            print("Custom chip select: enable neopixel chip now...")
+        
+        def disable(self):
+            print("Custom chip select: disable neopixel chip now...")
+
+
+    Neopixel(num := 1000, color_mode=ColorMode.RGB).to(MyNeopixel(custom_cs=MyChipSelect(), param1=1234, param2=5678)).set_value(0, np.random.rand(num, 4))()
+
+    quit()
+
+
 
 def basic_tests():
     n1 = Neopixel(10).to(neo1dev)
     n2 = Neopixel(10).to(neo2dev)
-    
+
     n1[:] = 0.3
     n1[0] = 0.2, 0.3, 0.4
 
@@ -218,8 +248,8 @@ def fire():
         )
 
     # Let the candles burn:
-    while True:
-        candle1.progress()
+    #while True:
+    Every(1).do(candle1.progress).do_while()
         #candle2.progress()
 
 
@@ -228,32 +258,32 @@ def meteor_shower():
                     decay_value=0.95, 
                     roll_interval=0.02
                     )
-    while True:
-        meteor.progress()
+    
+    #while True:
+    Every(1).do(meteor.progress).do_while()
 
 
 if __name__ == "__main__":
+    test_custom_device()
+    print()
+
     print()
     basic_tests()
-
-    # One line to rule them all:
-    Neopixel(1).to(ConsoleSimulationDevice()).set_value(0, (1.0, 0.0, 0.0, 0.0), color_mode=ColorMode.RGB)()
     print()
-
-    device1 = CustomDevice()
 
     GammaTest()
     print()
+
     ColorModeTest()
     print()
+
     power_measure()
     print()
 
     Neopixel(23).to(neo1dev).clear()()
     Neopixel(150).to(neo2dev).clear()()
-
     print()
 
     # light_show()
     fire()
-    # meteor_shower()
+    meteor_shower()
