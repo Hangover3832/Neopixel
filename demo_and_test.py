@@ -2,30 +2,26 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 from neopixel_classes import Neopixel
-from devices import ConsoleSimulationDevice, NeopixelDevice, OutputDevice
+from devices import ConsoleSimulationDevice, NeopixelDevice
 from colors import ColorMode, PixelOrder, create_gamma_function, G, SOME_COLORS
 from every import Every # https://raw.githubusercontent.com/Hangover3832/every_timer/refs/heads/main/every.py
 from random import random, randint
 from effects import Fire, Meteor
+from time import sleep
 
 
 try:
-    from rpi_devices import GPIOzeroOutputDevice, RpiSpiDev
+    from rpi_devices import RpiSpiDev # type: ignore
 
-    CS1 = None # GPIOzeroOutputDevice(bcm_pin=12) # use bcm_pin 12 for chip select
-    CS2 = None # GPIOzeroOutputDevice(bcm_pin=13) # use bcm_pin 12 for chip select
-    neo1dev = RpiSpiDev(device=0, custom_cs=CS1)
-    neo2dev = RpiSpiDev(device=1, custom_cs=CS2, pixel_order=PixelOrder.GRBW)
+    neo1dev = RpiSpiDev(device=0)
+    neo2dev = RpiSpiDev(device=1, pixel_order=PixelOrder.GRBW)
 
 except ModuleNotFoundError:
     print("""
             Note: The python libraries 'gpiozero' and/or 'spidev' could not be imported.
-            Using dummy devices on a non Rapberry PI system to simulate a Neopixel stripe in the console.
+            Using console simulation devices on a non Rapberry PI system.
             """)
 
-
-    CS1 = None
-    CS2 = None
     neo1dev = ConsoleSimulationDevice()
     neo2dev = ConsoleSimulationDevice(pixel_order=PixelOrder.GRBW)
 
@@ -35,46 +31,54 @@ def test_custom_device():
     class MyNeopixel(NeopixelDevice):
         """Example how to implement a custom Neopixel device and passing custom parameters.
         This one simply prints the content of the whole 8bit RGB array"""
-        def write_to_device(self, buffer:NDArray[np.float32]) -> int:
+
+        def __init__(self, *args, pixel_order: PixelOrder = PixelOrder.GRB, **kwargs) -> None:
+            super().__init__(*args, pixel_order=pixel_order, **kwargs)
             print("example Neopixel device implementaion")
-            print(f"There are {self.neopixel.num_pixels} {self.pixel_order.name} pixels")
-            print(f"{self.kwargs=}")
+
+            print("Keyword arguments passed:")
+            for key, value in kwargs.items():
+                print(f"  - {key}={value}")
+    
+            print("Setting up a chip select output pin if desired...")
+
+
+        def write_to_device(self, buffer:NDArray[np.float32]):
+            print("Enabling chip select pin")
+            print("Byte array:")
             print(self._to_uint8(buffer))
-            return 0
-        
+            print("Disbaling chip select pin")
+
+
         def open_(self) -> Any:
-            print(f"Opening Neopixel device...")
-            return super().open_()
+            if super().open_():
+                print(f"Opening Neopixel device...", end='')
+                print(f"There are {self.neopixel.num_pixels} {self.pixel_order.name} pixels")
+                print(f"Opening the chip select device...")
+
 
         def close_(self) -> Any:
-            print(f"Closing Neopixel device...")
-            return super().close_()
+            if super().close_():
+                print(f"Closing the chip select device...")
+                print(f"Closing Neopixel device...")
+    
 
 
-    class MyChipSelect(OutputDevice):
-        def open_(self) -> Any:
-            print("Opening chip select device...")
-            return super().open_()
-
-        def close_(self) -> Any:
-            print("Closing chip select device...")
-            return super().close_()
-
-        def enable(self):
-            print("Custom chip select: enable neopixel chip now...")
-        
-        def disable(self):
-            print("Custom chip select: disable neopixel chip now...")
-
-
-    Neopixel(num := 1000, color_mode=ColorMode.RGB).to(MyNeopixel(custom_cs=MyChipSelect(), param1=1234, param2=5678)).set_value(0, np.random.rand(num, 4))()
-
-    quit()
-
+    Neopixel(num := 1000, color_mode=ColorMode.RGB).to(MyNeopixel(param1=1234, param2=5678)).set_value(0, np.random.rand(num, 4))().close_()
+    """ 
+    equals to:
+        num = 100
+        dev = MyNeopixel(param1=1234, param2=5678)
+        neo = Neopixel(num, color_mode=ColorMode.RGB)
+        neo.to(dev)
+        neo.set_value(0, np.random.rand(num, 4))
+        neo()
+        neo.close_()
+    """
 
 
 def basic_tests():
-    n1 = Neopixel(10).to(neo1dev)
+    n1 = Neopixel(10).to(neo1dev).set_value(0, np.random.rand(10, 3))()
     n2 = Neopixel(10).to(neo2dev)
 
     n1[:] = 0.3
@@ -85,6 +89,7 @@ def basic_tests():
     n2[1] = 0.6, 0.7, 0.8, 0.0
 
     n1()
+
     print('\n', n1[:])
     n2()
     print('\n', n2[:])
@@ -122,6 +127,8 @@ def basic_tests():
     n1.create_gradient(from_value=start, to_value=end)
     n1()
     print('\n', n1[:])
+    n1.close_()
+    n2.close_()
 
 
 def ColorModeTest():
@@ -143,6 +150,7 @@ def ColorModeTest():
             process_mode(cm)
 
     run_test()
+    print()
 
 
 def GammaTest() -> None:
@@ -154,10 +162,12 @@ def GammaTest() -> None:
     if neo.device.is_simulated:
         print()
 
-    neo()
+    neo().close_()
+
 
 
 def Rainbow(neo: Neopixel):
+    neo.gamma_func = G.default.value
 
     @Every.every(0.5, n=neo) # note that the interval gets overriden in the function
     def drop(n:Neopixel):
@@ -186,6 +196,8 @@ def Rainbow(neo: Neopixel):
         drop()
         roll()
 
+    print()
+
 
 def Raindrops(neo: Neopixel):
     neo.gamma_func = G.linear.value
@@ -205,29 +217,38 @@ def Raindrops(neo: Neopixel):
         value = random() # a random color in HSV color space
         n(index, value)
 
-    @Every.While(30, n=neo) # repeat for 30s
+    @Every.While(5, n=neo) # repeat for 30s
     def proceed(n:Neopixel):
         drop(n)
         dropW(n)
         n *= 0.98 # pixel decay
         n()
 
+    print()
+
 
 def light_show():
     neo = Neopixel(150).to(neo2dev)
-    while True:
+
+    @Every.While(30)
+    def loop():
         Rainbow(neo)
         Raindrops(neo)
         neo.reversed = not neo.reversed
+
+    neo.close_()
 
 
 def power_measure():
     lin_gamma = create_gamma_function(np.array([0.0, 1.0]))
     neo = Neopixel(100, color_mode=ColorMode.RGB, gamma_func=lin_gamma).to(neo2dev)
     neo.watts_per_led = np.array([0.042, 0.042, 0.042, 0.084])
-    neo[:] = 1.0, 1.0, 1.0, 1.0
-    neo().clear()()
-    print(f"{neo().power_consumption=}")
+    for i, _ in enumerate(range(5), start=1):
+        neo[:] = 1.0/i, 1.0/i, 1.0/i, 1.0/i
+        neo()
+        print(f"{neo().power_consumption=}W")
+        sleep(0.2)
+    neo.close_()
 
 
 def fire():
@@ -248,9 +269,11 @@ def fire():
         )
 
     # Let the candles burn:
-    #while True:
-    Every(1).do(candle1.progress).do_while()
+    while True:
+        candle1.progress()
         #candle2.progress()
+
+    print()
 
 
 def meteor_shower():
@@ -259,31 +282,20 @@ def meteor_shower():
                     roll_interval=0.02
                     )
     
-    #while True:
-    Every(1).do(meteor.progress).do_while()
+    while True:
+        meteor.progress()
+
+    print()
 
 
 if __name__ == "__main__":
     test_custom_device()
-    print()
-
-    print()
     basic_tests()
-    print()
-
     GammaTest()
-    print()
-
     ColorModeTest()
-    print()
-
     power_measure()
-    print()
-
     Neopixel(23).to(neo1dev).clear()()
     Neopixel(150).to(neo2dev).clear()()
-    print()
-
     # light_show()
     fire()
-    meteor_shower()
+    #meteor_shower()

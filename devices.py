@@ -1,15 +1,28 @@
-from typing import Optional
+from enum import Enum
+from typing import Any
 from numpy.typing import NDArray
 import numpy as np
-from neopixel_classes import OutputDevice, NeopixelDevice, Neopixel, Spi_Bit_Encoding
+from neopixel_classes import NeopixelDevice, Neopixel
 from colors import PixelOrder
+
+class Spi_Clock(Enum): # SPI clock rates
+    CLOCK_400KHZ  = 1_625_000
+    CLOCK_800KHZ  = 3_250_000
+    CLOCK_1200KHZ = 6_500_000
+
+class Spi_Bit_Encoding(Enum):
+    # for SPI devices:
+    SPI_HIGH_BIT   = 0xC0
+    SPI_LOW_BIT    = 0x80
+    SPI_HIGH_BIT2  = 0x0C
+    SPI_LOW_BIT2   = 0x08
 
 
 #-----------------------------------------------------------
 class SPIDevice(NeopixelDevice):
 
-    def __init__(self, *, pixel_order:PixelOrder=PixelOrder.GRB, custom_cs:OutputDevice | None = None, **kwargs) -> None:
-        super().__init__(pixel_order=pixel_order, custom_cs=custom_cs, **kwargs)
+    def __init__(self, *args, pixel_order:PixelOrder=PixelOrder.GRB, **kwargs) -> None:
+        super().__init__(*args, pixel_order=pixel_order, **kwargs)
         self._spi_buffer: NDArray[np.uint8] | None = None
 
 
@@ -28,10 +41,10 @@ class SPIDevice(NeopixelDevice):
         self._spi_buffer = np.zeros([self._double_bits_per_pixel, self.neopixel.num_pixels], dtype=np.uint8)
 
 
-    def write_to_device(self, buffer: NDArray[np.float32]) -> int:
+    def write_to_device(self, buffer: NDArray[np.float32]) -> Any:
         if self.neopixel is None or self._spi_buffer is None:
-            raise ValueError("Attribute `neopixel` is not set")
-        
+            raise ValueError("Attribute `neopixel` or its pixel buffer is not set")
+
         rgb_buffer = self._to_uint8(buffer)
 
         # Convert [r, g, b, (w)] to uint32:
@@ -56,9 +69,7 @@ class SPIDevice(NeopixelDevice):
                         bit2, Spi_Bit_Encoding.SPI_HIGH_BIT2.value, Spi_Bit_Encoding.SPI_LOW_BIT2.value)
                     ).astype(np.uint8)
             
-        return len(self._spi_buffer)
-    
-        # self._spi_buffer is now ready to be used by the child class
+        # self._spi_buffer is now ready to be used by a child class
 
 
 #-----------------------------------------------------------
@@ -66,11 +77,16 @@ class ConsoleSimulationDevice(NeopixelDevice):
 
     LED_CHAR = "\u25CF"
 
-    def __init__(self, *, pixel_order:PixelOrder=PixelOrder.GRB, **kwargs) -> None:
-        super().__init__(pixel_order=pixel_order, custom_cs=None, **kwargs)
+    def __init__(self, *args, line_end:str='', pixel_order:PixelOrder=PixelOrder.GRB, **kwargs) -> None:
+        super().__init__(*args, pixel_order=pixel_order, custom_cs=None, **kwargs)
         self.is_simulated = True
+        self.line_end = line_end
 
-    def write_to_device(self, buffer:NDArray[np.float32]) -> int:
+    def close_(self) -> Any:
+        if super().close_():
+            print()
+
+    def write_to_device(self, buffer:NDArray[np.float32]) -> Any:
         print('', end='\r')
         for value in (_ := self._to_uint8(buffer)):
             g, r, b = value[:3]
@@ -78,21 +94,27 @@ class ConsoleSimulationDevice(NeopixelDevice):
             print(f"\033[48;2;{w};{w};{w}m", end='') # the background color simulates the white LED in a GRBW Neopixel
             print(f"\033[38;2;{r};{g};{b}m{self.LED_CHAR}\033[0m", end='', flush=True) # print the LEDs
 
-        return 0
+        if self.line_end:
+            print('', self.line_end)
+
 
 #-----------------------------------------------------------
-class ConsoleSimulationSPIDevice(SPIDevice):
+class ConsoleSPISimulationDevice(SPIDevice):
 
     LED_CHAR = "\u25CF"
 
-    def __init__(self, *, pixel_order:PixelOrder=PixelOrder.GRB, **kwargs) -> None:
-        super().__init__(pixel_order=pixel_order, custom_cs=None, **kwargs)
+    def __init__(self, *args, line_end:str='', pixel_order:PixelOrder=PixelOrder.GRB, **kwargs) -> None:
+        super().__init__(*args, pixel_order=pixel_order, custom_cs=None, **kwargs)
         self.is_simulated = True
+        self.line_end = line_end
 
-    def write_to_device(self, buffer:NDArray[np.float32]) -> int:
+    def close_(self) -> Any:
+        if super().close_():
+            print()
+
+    def write_to_device(self, buffer:NDArray[np.float32]) -> Any:
         super().write_to_device(buffer)
         assert self._spi_buffer is not None
-        _buffer = self._spi_buffer.T.flatten()
 
         if self.neopixel is None:
             raise ValueError("Attribute `neopixel` is not set")
@@ -105,14 +127,12 @@ class ConsoleSimulationSPIDevice(SPIDevice):
                 result = (result << 2) | bit_values[bit] # shift 2 bits and inject 2 new bits
             return result
 
-        double_bits_per_pixel = 12 if len(self._pixel_order.name) == 3 else 16 # check if is GRB or GRBW...
-        _buffer = _buffer.reshape([_buffer.shape[0]//double_bits_per_pixel, double_bits_per_pixel]) # ...and reshape the buffer accordingly
         print('', end='\r')
-        for bits in _buffer: 
+        for bits in self._spi_buffer.T: 
             g, r, b = convert(bits[0:4]), convert(bits[4:8]), convert(bits[8:12])
             w = convert(bits[12:16]) if bits.shape[0]>12 else 0
             print(f"\033[48;2;{w};{w};{w}m", end='') # the background color simulates the white LED in a GRBW Neopixel
             print(f"\033[38;2;{r};{g};{b}m{self.LED_CHAR}\033[0m", end='', flush=True) # print the LEDs
 
-        return 0
-    
+        if self.line_end:
+            print('', self.line_end)

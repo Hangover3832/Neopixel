@@ -1,7 +1,7 @@
 from __future__ import annotations
 from abc import ABC, abstractmethod
 from enum import Enum
-from typing import Any, Callable, Literal, Optional
+from typing import Any, Callable
 import numpy as np
 from numpy.typing import NDArray
 from colors import ColorMode, PixelOrder, G
@@ -10,71 +10,16 @@ from colors import ColorMode, PixelOrder, G
 PixelIndex = int | list[int] | tuple[int, ...] | slice
 PixelValue = np.ndarray | list[float] | tuple[float, ...] | float | int
 
-class Spi_Clock(Enum): # SPI clock rates
-    CLOCK_400KHZ  = 1_625_000
-    CLOCK_800KHZ  = 3_250_000
-    CLOCK_1200KHZ = 6_500_000
-
-class Spi_Bit_Encoding(Enum):
-    # for SPI devices:
-    SPI_HIGH_BIT   = 0xC0
-    SPI_LOW_BIT    = 0x80
-    SPI_HIGH_BIT2  = 0x0C
-    SPI_LOW_BIT2   = 0x08
-
-#-----------------------------------------------------------
-class OutputDevice:
-    """Common abstract base class for digital switching output, used for custom chip select"""
-
-    def __init__(self, *args, **kwargs) -> None:
-        self.args: tuple = args
-        self.kwargs: dict = kwargs
-        self._neopixel_device: NeopixelDevice | None = None
-        self._is_open: bool = False
-
-    def open_(self) -> Any:
-        self._is_open = True
-    
-    def close_(self) -> Any:
-        self._is_open = False
-    
-    def __del__(self):
-        if self._is_open:
-            self.close_()
-
-    @abstractmethod
-    def enable(self) -> Any:
-        raise NotImplementedError
-    
-    @abstractmethod
-    def disable(self) -> Any:
-        raise NotImplementedError
-
-    def set_device(self, device:NeopixelDevice) -> None:
-        self._neopixel_device = device
-
-    @property
-    def device(self) -> NeopixelDevice | None:
-        return self._neopixel_device
-
-    @device.setter
-    def device(self, device:NeopixelDevice) -> None:
-        self.set_device(device=device)
-
-
 #-----------------------------------------------------------
 class NeopixelDevice(ABC):
-    def __init__(self, *args, pixel_order:PixelOrder = PixelOrder.GRB, custom_cs:OutputDevice | None = None, **kwargs) -> None:
+    def __init__(self, *args, pixel_order:PixelOrder = PixelOrder.GRB, **kwargs) -> None:
         super().__init__()
         self._neopixel: Neopixel | None = None
         self._pixel_order: PixelOrder = pixel_order
         self.is_simulated: bool = False
-        self._cs: OutputDevice | None = custom_cs
         self.args: tuple = args
         self.kwargs: dict = kwargs
         self._is_open: bool = False
-        if self._cs is not None:
-            self._cs.device = self
 
 
     @abstractmethod
@@ -82,34 +27,30 @@ class NeopixelDevice(ABC):
         raise NotImplementedError
 
 
-    def _to_uint8(self, buffer:NDArray[np.float32]) -> NDArray[np.uint8]:
-        # scale to [0, 255], and convert to uint8:
-        return np.clip(np.round(255 * buffer), 0, 255).astype(np.uint8)
-
-
     def _write_buffer(self, buffer:NDArray[np.float32]) -> Any:
 
         # rearange the rgb_buffer to the correct PixelOrder
         # Here, we allow every possible pixel order with R,G,B and optional W
         buffer = buffer[:, [self.pixel_order.name.index(c) for c in 'RGBW' if c in self.pixel_order.name]]
-
-        if self._cs is not None:
-            self._cs.enable()
-
         self.write_to_device(buffer)
 
-        if self._cs is not None:
-            self._cs.disable()
 
-    def open_(self) -> Any:
-        if self._cs is not None:
-            self._cs.open_()
+    def _to_uint8(self, buffer:NDArray[np.float32]) -> NDArray[np.uint8]:
+        # scale to [0, 255], and convert to uint8:
+        return np.clip(np.round(255 * buffer), 0, 255).astype(np.uint8)
+
+
+    def open_(self) -> bool:
+        result = not self._is_open
         self._is_open = True
+        return result
 
-    def close_(self) -> Any:
-        if self._cs is not None:
-            self._cs.close_()
+
+    def close_(self) -> bool:
+        result = self._is_open
         self._is_open = False
+        return result
+
 
     def __del__(self):
         if self._is_open:
@@ -127,7 +68,7 @@ class NeopixelDevice(ABC):
         if self._neopixel is None:
             raise ValueError("`neopixel` attribute not set.")
         return self._neopixel
-    
+
     @neopixel.setter
     def neopixel(self, neopixel:Neopixel) -> None:
         self.set_neopixel(neopixel)
@@ -179,6 +120,11 @@ class Neopixel:
         self._device.neopixel = self
         self._device.open_()
         return self if is_new else self.auto_show()
+
+
+    def close_(self):
+        if self._device is not None and self._device._is_open:
+            self._device.close_()
 
 
     def begin_update(self) -> 'Neopixel':
