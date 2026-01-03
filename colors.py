@@ -104,8 +104,9 @@ CUSTOM_GAMMA = np.array([
     1.0     # value for 100% brightness
 ]) # insert more values in between if desired
 
-LINEAR_GAMMA = np.array([0.0, 1.0])
-INVERSE_GAMMA = np.array([1.0, 0.0])
+#LINEAR_GAMMA = np.array([0.0, 1.0])
+#INVERSE_GAMMA = np.array([1.0, 0.0])
+
 SQUARE_GAMMA = np.array([0.0, 0.25, 1.0])
 
 SIMPLE_GAMMA = np.array([0.0, 0.214, 1.0]) # sRGB 21.4% middle grey
@@ -174,9 +175,11 @@ class G(Enum):
     no_dark = create_gamma_function(NO_DARK_GAMMA)
     crazy   = create_gamma_function(CRAZY_GAMMA)
     square  = create_gamma_function(SQUARE_GAMMA)
-    linear  = create_gamma_function(LINEAR_GAMMA)
-    inverse = create_gamma_function(INVERSE_GAMMA)
-    custom  = create_gamma_function(CUSTOM_GAMMA)
+    #linear  = create_gamma_function(LINEAR_GAMMA)
+    #inverse = create_gamma_function(INVERSE_GAMMA)
+    
+
+custom_gamma = create_gamma_function(CUSTOM_GAMMA)
 
 
 def main():
