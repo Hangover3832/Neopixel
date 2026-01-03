@@ -29,8 +29,7 @@ class SPIDevice(NeopixelDevice):
     1 pixel = 8 bits per color channel
     For RGB pixels: 1 pixel = 24 bits = 12 SPI bytes
     For RGBW pixels: 1 pixel = 32 bits = 16 SPI bytes
-
-    Child classes can access the encoded SPI byte buffer via the 'spi_buffer' property.
+    The instance creates a SPI buffer in open_() that is passed to write_to_device() calls.
     """
 
     SPI_HIGH_BIT   = 0xC0
@@ -51,17 +50,24 @@ class SPIDevice(NeopixelDevice):
             self._msb_mask = 0x800000
             self._c_mask = 0xFFFFFF
 
-        self._spi_buffer: NDArray[np.uint8] | None = None
+
+    def open_(self, num_pixels:int) -> NDArray[np.uint8]:
+        """Open device and create SPI buffer to be stored in Neopixel instance."""
+        super().open_(num_pixels)
+        return np.zeros([self._double_bits_per_pixel, self._num_pixels], dtype=np.uint8)
 
 
-    def set_num_pixels(self, num: int) -> Any:
-        result = super().set_num_pixels(num)
-        self._spi_buffer = np.zeros([self._double_bits_per_pixel, num], dtype=np.uint8)
-        return result
-
-
-    def write_to_device(self, buffer: NDArray[np.float32]) -> Any:
-        """Encode pixel data to SPI byte patterns."""
+    def write_to_device(self, buffer: NDArray[np.float32], device_data: NDArray[np.uint8]) -> Any:
+        """Encode pixel data to SPI byte patterns.
+        
+        :param buffer: Pixel data to encode
+        :type buffer: np.ndarray[[float, ...], [float, ...]]
+        :param device_data: The SPI buffer from the Neopixel instance
+        :type device_data: np.ndarray[np.uint8]
+        :raises ValueError: If device_data is None
+        """
+        # if device_data is None:
+        #   raise ValueError("SPIDevice requires device_data (spi_buffer) to be passed from Neopixel._write_buffer()")
 
         rgb_buffer = self._to_uint32(buffer)
 
@@ -72,26 +78,21 @@ class SPIDevice(NeopixelDevice):
             bit2 = (rgb_buffer & self._msb_mask).astype(bool) 
             rgb_buffer = ((rgb_buffer << 1) & self._c_mask).astype(np.uint32)
             # encode 2 pixel bits into 1 SPI byte:
-            self.spi_buffer[i] = (np.where(
+            device_data[i] = (np.where(
                         bit1, self.SPI_HIGH_BIT,  self.SPI_LOW_BIT
                         ) | np.where(
                         bit2, self.SPI_HIGH_BIT2, self.SPI_LOW_BIT2)
                     ).astype(np.uint8)
 
-        # self.spi_buffer is now ready to be used by a child class
-
-    @property
-    def spi_buffer(self) -> NDArray[np.uint8]:
-        assert self._spi_buffer is not None, "Attribute _spi_buffer is None"
-        return self._spi_buffer
+        # device_data is now ready to be used by a child class
 
 
 #-----------------------------------------------------------
 class ConsoleSimulationDevice(NeopixelDevice):
     """
     A console based Neopixel device simulation.
-    It prints colored circles to the console to represent the Neopixel colors.
-    You can configure line endings, line splits, white LED's and the character used to represent LEDs.
+    It prints colored characters to the console to represent the Neopixel colors.
+    You can configure line endings, line splits, and the character used to represent LEDs.
     """
 
     def __init__(self, *, pixel_order:PixelOrder=PixelOrder.GRB, **kwargs) -> None:
@@ -103,10 +104,11 @@ class ConsoleSimulationDevice(NeopixelDevice):
         self.led_char = "\u25CF"
 
     def close_(self) -> Any:
-        if super().close_():
-            print()
+        super().close_()
+        print()
 
-    def write_to_device(self, buffer:NDArray[np.float32]) -> Any:
+
+    def write_to_device(self, buffer:NDArray[np.float32], device_data: None) -> Any:
         print('', end='\r')
         for i, value in enumerate(self._to_uint8(buffer), start=1):
             g, r, b = value[:3]
@@ -142,13 +144,14 @@ class ConsoleSPISimulationDevice(SPIDevice):
         self.led_char: str = "\u25CF"
 
     def close_(self) -> Any:
-        if super().close_():
-            print()
+        super().close_()
+        print()
 
-    def write_to_device(self, buffer:NDArray[np.float32]) -> Any:
-        super().write_to_device(buffer)
+    def write_to_device(self, buffer:NDArray[np.float32], device_data: NDArray[np.uint8]) -> Any:
+        super().write_to_device(buffer, device_data)
  
-        assert self._spi_buffer is not None
+        if device_data is None:
+            raise ValueError("ConsoleSPISimulationDevice requires device_data to be passed")
 
         def convert(bits: np.ndarray) -> int:
             # bits = np.ndarray[uint8, uitn8, uint8, uint8] = 4 double bits = 8 bits = 1 byte
@@ -159,7 +162,7 @@ class ConsoleSPISimulationDevice(SPIDevice):
             return result
 
         print('', end='\r')
-        for bits in self.spi_buffer.T: 
+        for bits in device_data.T: 
             g, r, b = convert(bits[0:4]), convert(bits[4:8]), convert(bits[8:12])
             w = convert(bits[12:16]) if bits.shape[0]>12 else 0
             print(f"\033[48;2;{w};{w};{w}m", end='') # the background color simulates the white LED in a GRBW Neopixel
@@ -173,7 +176,7 @@ class ConsoleSPISimulationDevice(SPIDevice):
 class GraphicSimulation(NeopixelDevice):
     """
     A graphical Neopixel device simulation using tkinter.
-    This really does not do very well....
+    It's an embarrassing pain in the a**....
     """
 
     def print_hello(self):
@@ -198,27 +201,22 @@ class GraphicSimulation(NeopixelDevice):
         self.canvas.pack()
 
 
-    def open_(self):
-        if super().open_():
-            width, height = self.led_size, self.led_size*(self.num_pixels)
-            if self.horizontal:
-                width, height = height, width
+    def open_(self, num_pixels):
+        super().open_(num_pixels)
+        width, height = self.led_size, self.led_size*(self.num_pixels)
+        if self.horizontal:
+            width, height = height, width
 
-            self.canvas.configure(width=width, height=height)
-            return "test"
+        self.canvas.configure(width=width, height=height)
+        return None
 
 
     def close_(self):
-        if super().close_():
-            self.window.mainloop()
-            return True
-        return False
+        super().close_()
+        self.window.mainloop()
 
 
-    def write_to_device(self, buffer: NDArray[np.float32]) -> Any:
-
-        if not self._is_open:
-            raise RuntimeError("Error: Cannor write to the device, it is closed.")
+    def write_to_device(self, buffer: NDArray[np.float32], device_data: Any = None) -> Any:
 
         buf = self._to_uint32(buffer) if self.horizontal else self._to_uint32(buffer[::-1])
         for i in range(buf.shape[0]):

@@ -1,5 +1,6 @@
 from typing import Callable
 import numpy as np
+from numpy.typing import NDArray
 from numpy.polynomial import Polynomial as Poly
 from enum import Enum, auto
 from color_conversions import rgb_to_hsv, hsv_to_rgb, yiq_to_rgb, temperature_to_RGB
@@ -42,12 +43,11 @@ class ColorMode(Enum):
     # YIQ = auto() # implement yiq_to_rgb() and rgb_to_yiq() first
     # HLS = auto() # implement hls_to_rgb() and rgb_to_hls() first
 
-
     @classmethod
     def kelvin_to_rgb(cls, kelvin: float) -> np.ndarray:
         return np.array(temperature_to_RGB(kelvin))
 
-    def convert_to(self, value: np.ndarray, to_mode:'ColorMode') -> np.ndarray:
+    def convert_to(self, value: NDArray[np.float32], to_mode:'ColorMode') -> np.ndarray:
         """
         Convert color value from this color mode to the specified color mode.
         Note that the color conversion function mode_to_mode() must be globally avilable.
@@ -65,7 +65,7 @@ class ColorMode(Enum):
         convert_function = f"{self.name.lower()}_to_{to_mode.name.lower()}"
         function = globals().get(convert_function)
         if function and callable(function):
-            return function(value) # type: ignore
+            return np.asarray(function(value))
 
         raise NotImplementedError(
             f"{self.name} to {to_mode.name} is not implemented: `{convert_function}({self.name.lower()}:NDArray[np.float32]) -> NDArray[np.float32]`"
@@ -84,6 +84,10 @@ class PixelOrder(Enum):
     def num(self) -> int:
         """Return the number of LED per pixel (3 or 4)"""
         return len(self.name)
+    
+    @property
+    def has_W(self) -> bool:
+        return self.num == 4
 
     @property
     def blank(self) -> np.ndarray:

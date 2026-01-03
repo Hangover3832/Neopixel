@@ -44,18 +44,20 @@ def test_custom_device():
             print("Setting up a chip select output pin if desired...")
 
 
-        def write_to_device(self, buffer:NDArray[np.float32]):
+        def write_to_device(self, buffer:NDArray[np.float32], device_data: int):
+            assert device_data == self.num_pixels, "This is just a test to show how to pass device_data returned from open_() to the device."
             print("Enabling chip select pin")
             print("Byte array:")
             print(self._to_uint8(buffer))
             print("Disbaling chip select pin")
 
 
-        def open_(self) -> Any:
-            if super().open_():
-                print(f"Opening Neopixel device...", end='')
-                print(f"There are {self.num_pixels} {self.pixel_order.name} pixels")
-                print(f"Opening the chip select device...")
+        def open_(self, num_pixels: int) -> Any:
+            super().open_(num_pixels)
+            print(f"Opening Neopixel device...", end='')
+            print(f"There are {self.num_pixels} {self.pixel_order.name} pixels")
+            print(f"Opening the chip select device...")
+            return self.num_pixels
 
 
         def close_(self) -> Any:
@@ -63,7 +65,6 @@ def test_custom_device():
                 print(f"Closing the chip select device...")
                 print(f"Closing Neopixel device...")
     
-
 
     Neopixel(num := 1000, color_mode=ColorMode.RGB).to(MyNeopixel(param1=1234, param2=5678)).set_value(0, np.random.rand(num, 4,).astype(np.float32))().close_()
     """ 
@@ -84,31 +85,28 @@ def basic_tests():
 
     n1[:] = 0.3
     n1[0] = 0.2, 0.3, 0.4
+    print('\nn1=', n1()[:])
 
     n2[:] = 1.0
     n2[0] = 0.2, 0.3, 0.4
     n2[1] = 0.6, 0.7, 0.8, 0.0
+    print('\nn2=', n2()[:])
 
-    n1()
-
-    print('\n', n1[:])
-    n2()
-    print('\n', n2[:])
     print()
 
     print("RGB:")
-    n2.clear()
-    n2[0] = 1,0, 0.0, 0.0
-    n2[1] = 0.0, 1.0, 0.0
-    n2[2] = 0.0, 0.0, 1.0
-    n2.set_value(3, (0.0, 1.0, 1.0), color_mode=ColorMode.HSV)
-    n2.set_value(4, (0.333, 1.0, 1.0), color_mode=ColorMode.HSV)
-    n2.set_value(5, (0.666, 1.0, 1.0), color_mode=ColorMode.HSV)
+    n2.clear().color_mode=ColorMode.RGB
+    n2[0] = 1,0, 0.0, 0.0 # red
+    n2[1] = 0.0, 1.0, 0.0 # green
+    n2[2] = 0.0, 0.0, 1.0 # blue
+    n2.set_value(3, (0.0, 1.0, 1.0), color_mode=ColorMode.HSV) # red
+    n2.set_value(4, (0.333, 1.0, 1.0), color_mode=ColorMode.HSV) # green
+    n2.set_value(5, (0.666, 1.0, 1.0), color_mode=ColorMode.HSV) # blue
     n2()
     print()
     print(n2[:])
-    print()
 
+    print()
 
     print("Broadcasting")
     n2.clear()
@@ -117,8 +115,37 @@ def basic_tests():
         [0.2, 0.2, 0.2],
         [0.3, 0.3,0.3]]
         )
-    n2[4] = a # broadcast to index 4
-    print('\n', n2()[:])
+
+    n2[0] = a # broadcast to index 0
+    n2()
+    print('\n', n2[:])
+    print()
+
+    n2[7] = a # broadcast to index 7 (to the end)
+    n2()
+    print('\n', n2[:])
+    print()
+
+    n2[4:7] = a # broadcast to slice 4:7
+    n2()
+    print('\n', n2[:])
+    print()
+
+    try:
+        n2[8] = a
+        assert False, "This should not happen"
+    except ValueError:
+        print("Ok")
+
+
+    n2.create_gradient(0.0, 1.0) # create a gradient, but to the white pixels only
+    n2()
+    print('\n', n2[:])
+    print()
+
+    n1.create_gradient(0.0, 1.0) # create a gradient, but to the white pixels only
+    n1()
+    print('\nn1=', n1[:])
     print()
 
     print("Rainbow gradient:")
@@ -130,6 +157,7 @@ def basic_tests():
     print('\n', n1[:])
     n1.close_()
     n2.close_()
+
 
 
 def ColorModeTest():
@@ -186,10 +214,8 @@ def Rainbow(neo: Neopixel):
 
     # Create a rainbow pattern in the default HSV space
     neo.create_gradient([0.0, 1.0, 1.0], [1.0, 1.0, 1.0])
-    #for i in neo:
-    #    neo[i] = (i/(neo.num_pixels-1), 1.0, 1.0)
 
-    @Every.While(5) # repeat for 5s
+    @Every.While(1) # repeat for 5s
     def proceed():
         drop()
         roll()
@@ -213,7 +239,7 @@ def Raindrops(neo: Neopixel):
         value = random() # a random color in HSV color space
         n(index, value)
 
-    @Every.While(5, n=neo) # repeat for 30s
+    @Every.While(1, n=neo) # repeat for 5s
     def proceed(n:Neopixel):
         drop(n)
         dropW(n)
@@ -226,7 +252,7 @@ def Raindrops(neo: Neopixel):
 def light_show():
     neo = Neopixel(150).to(neo2dev)
 
-    @Every.While(30)
+    @Every.While(5)
     def loop():
         Rainbow(neo)
         Raindrops(neo)
@@ -265,16 +291,17 @@ def effects():
         )
     
 
-    while True:
+    @Every.While(5)
+    def run_effects():
         neo.reversed = False
         candle.resume()
-        Every.While(10)(candle.progress)
+        Every.While(1)(candle.progress)
         candle.pause()
         Every.While(1)(candle.progress) # settle for 1s
 
         neo.reversed = True
         meteor.resume()
-        Every.While(10)(meteor.progress) # drop for 10s
+        Every.While(1)(meteor.progress) # drop for 10s
         meteor.pause()
         Every.While(1)(meteor.progress) # settle for 1s
 
@@ -325,6 +352,6 @@ if __name__ == "__main__":
     power_measure()
     Neopixel(23).to(neo1dev).clear()().device.close_()
     Neopixel(150).to(neo2dev).clear()().device.close_()
-    # light_show()
+    light_show()
     effects()
     #graphic_simulator()

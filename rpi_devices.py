@@ -46,11 +46,13 @@ class RpiSpiDev(SPIDevice):
             raise RuntimeError("Error: Could not open SPI device. Ensure SPI is enabled in raspi-config and the device number is correct.")
 
 
-    def write_to_device(self, buffer: NDArray[np.float32]) -> Any:
+    def write_to_device(self, buffer: NDArray[np.float32], device_data: NDArray[np.uint8] | None = None) -> Any:
+        """Write pixel data to SPI device."""
+        assert device_data is not None, "RpiSpiDev requires device_data (spi_buffer) to be passed from Neopixel._write_buffer()"
         if self._cs is not None:
             self._cs.on()
-        super().write_to_device(buffer)
+        super().write_to_device(buffer, device_data)
         if self._cs is not None:
             self._cs.off()
 
-        self._spi.writebytes2(self.spi_buffer.T.flatten())
+        self._spi.writebytes2(device_data.T.flatten())

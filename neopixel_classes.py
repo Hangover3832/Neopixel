@@ -1,5 +1,6 @@
 from __future__ import annotations
 from abc import ABC, abstractmethod
+from collections import defaultdict
 from enum import Enum
 from typing import Any, Callable
 import numpy as np
@@ -27,33 +28,37 @@ class NeopixelDevice(ABC):
         self.is_simulated: bool = False
         self.args: tuple = args
         self.kwargs: dict = kwargs
-        self._is_open: bool = False
-        self._num_pixels = 0
+        # self._is_open: bool = False
+        self._num_pixels: int = 0
 
 
     @abstractmethod
-    def write_to_device(self, buffer:NDArray[np.float32]) -> Any:
+    def write_to_device(self, buffer:NDArray[np.float32], device_data: Any) -> Any:
         """Write the given buffer to the Neopixel device.
         Override this method in subclasses to implement device-specific writing logic.
 
         :param buffer: A 2D array of shape (num_pixels, num_channels) containing pixel values.
         :type buffer: np.ndarray[[float, ...], [float, ...]]
+        :param device_data: Optional device-specific data from the Neopixel instance.
+        :type device_data: Any
         """
-        raise NotImplementedError
+        raise NotImplementedError("Subclasses must implement write_to_device() method.")
 
 
-    def _write_buffer(self, buffer:NDArray[np.float32]) -> Any:
+    def _write_buffer(self, buffer:NDArray[np.float32], device_data: Any) -> Any:
         """
         Write the given buffer to the Neopixel device after rearranging it to match the pixel order.
 
         :param buffer: A 2D array of shape (num_pixels, num_channels) containing pixel values.
         :type buffer: np.ndarray[[float, ...], [float, ...]]
+        :param device_data: Optional device-specific data returned from open_().
+        :type device_data: Any
         :returns: The result of the write_to_device() method.
         """
 
         #rearange the buffer to the correct pixel order and call write_to_device()
         buffer = buffer[:, [self.pixel_order.name.index(c) for c in 'RGBW' if c in self.pixel_order.name]]
-        self.write_to_device(buffer)
+        self.write_to_device(buffer, device_data)
 
 
     def _to_uint8(self, buffer:NDArray[np.float32]) -> NDArray[np.uint8]:
@@ -68,31 +73,50 @@ class NeopixelDevice(ABC):
         return np.bitwise_or.reduce(b << shifts, axis=1, dtype=np.uint32)
 
 
-    def open_(self) -> Any:
-        """Open the Neopixel device. Override this method in subclasses to implement device-specific opening logic."""
-        result = not self._is_open
-        self._is_open = True
-        return result
+    def open_(self, num_pixels:int) -> Any:
+        """Open the Neopixel device and return device-specific data if needed.
+        Override this method in subclasses to implement device-specific opening logic.
+        Returns device-specific data that will be passed to _write_buffer() calls.
+        """
+        #result = not self._is_open
+        #self._is_open = True
+        #return result
+        self._num_pixels = num_pixels
+        return None
 
 
     def close_(self) -> Any:
         """Close the Neopixel device. Override this method in subclasses to implement device-specific closing logic."""
-        result = self._is_open
-        self._is_open = False
-        return result
+        #result = self._is_open
+        #self._is_open = False
+        #return result
+        return None
 
 
     def __del__(self):
         """Ensure the device is closed upon deletion."""
-        if self._is_open:
-            self.close_()
+        #if self._is_open:
+        self.close_()
 
+    '''
     def set_num_pixels(self, num:int) -> None:
         """Set the number of pixels for the Neopixel device.
         Override this method in subclasses if needed in case the number of pixels changes."""
         if num <= 0:
             raise ValueError("Error: Number of pixels must be > 0")
         self._num_pixels = num
+    '''
+
+    @property
+    def num_pixels(self) -> int:
+        assert self._num_pixels > 0, "Attibute _num_pixel is not set."
+        return self._num_pixels
+
+    '''
+    @num_pixels.setter
+    def num_pixels(self, num:int) -> None:
+        self.set_num_pixels(num)
+    '''
 
 
     @property
@@ -100,14 +124,27 @@ class NeopixelDevice(ABC):
         return self._pixel_order
 
 
-    @property
-    def num_pixels(self) -> int:
-        assert self._num_pixels > 0, "Attibute _num_pixel is not set."
-        return self._num_pixels
+#-----------------------------------------------------------
+class NeopixelDevices:
+    """This class contains a list of devices that can be attached to a Neopixel class"""
+    def __init__(self, *, num_pixels:int, **kwargs) -> None:
+        self.devices: list[dict[str, Any]] = []
+        self.num_pixels = num_pixels
 
-    @num_pixels.setter
-    def num_pixels(self, num:int) -> None:
-        self.set_num_pixels(num)
+
+    def add_device(self, device:NeopixelDevice) -> None:
+        # Check if device not already in list:
+        for dev in self.devices:
+            if dev["device"] is device:
+                return
+
+        data = device.open_(self.num_pixels)
+        self.devices.append({"device": device, "data": data})
+
+
+    def write_to_devices(self, buffer:NDArray[np.float32]) -> Any:
+        for device in self.devices:
+            device["device"]._write_buffer(buffer, device["data"])
 
 
 #-----------------------------------------------------------
@@ -147,6 +184,7 @@ class Neopixel:
         self.watts_per_led: np.ndarray = np.array([0.081, 0.081, 0.08, 0.09])
 
         # Private attributes
+        self._num_pixels = num_pixels
         self._color_mode: ColorMode = color_mode
         self._current_power: float = 0.0
         self._max_power: float = max_power
@@ -154,27 +192,34 @@ class Neopixel:
         self._brightness: float = float(np.clip(brightness, 0., 1.))
         self._gamma_func: Callable = gamma_func or (lambda x: x)
         self._update_counter: int = 0
-        self._num_pixels = num_pixels
         self._mini_screens: list[np.ndarray] = []
+        self._pixel_buffer: NDArray[np.float32] = np.zeros((self._num_pixels, 4), dtype=np.float32)
+
         self._device: NeopixelDevice | None = None
-        self._pixel_buffer: NDArray[np.float32] | None = None
+        self._device_data: Any = None
+
+        # self._devices = NeopixelDevices(num_pixels=self._num_pixels)
 
 
     def to(self, device: NeopixelDevice) -> 'Neopixel':
         """Attach a NeopixelDevice to this Neopixel instance."""
-        is_new = self._pixel_buffer is None
+
+        # self._devices.add_device(device)
+
+        # Close the old device if switching devices
+        if self._device is not None and self._device is not device:
+            self._device.close_()
+
         self._device = device
-        device.num_pixels = self._num_pixels
 
-        if is_new: # first time setup of pixel buffer
-            self._pixel_buffer = np.zeros((self._num_pixels, device.pixel_order.num), dtype=np.float32)
+        # Capture device-specific data returned from open_
+        self._device_data = self._device.open_(self._num_pixels)
 
-        self._device.open_()
-        return self if is_new else self.auto_show()
+        return self.auto_show()
 
 
     def close_(self):
-        if self._device is not None and self._device._is_open:
+        if self._device is not None:
             self._device.close_()
 
 
@@ -273,7 +318,7 @@ class Neopixel:
         rgb_buffer = np.clip(self._brightness * rgb_buffer, 0.0, 1.0)
 
         # calculate power consumption
-        watts = self.watts_per_led if self.has_W else self.watts_per_led[:3]
+        watts = self.watts_per_led if self.device.pixel_order.has_W else np.append(self.watts_per_led[:3], 0.0)
         self._current_power = np.sum(watts * rgb_buffer).astype(float)
 
         # Power consumption limiter
@@ -284,8 +329,8 @@ class Neopixel:
         if self.reversed:
             rgb_buffer = rgb_buffer[::-1]
 
-        # Send data to device:
-        self.device._write_buffer(rgb_buffer)
+        # Send data to device with device-specific data:
+        self.device._write_buffer(rgb_buffer, self._device_data)
 
 
     def __setitem__(self, index: int | slice, value: PixelValue) -> None:
@@ -293,12 +338,12 @@ class Neopixel:
         self.set_value(index, value)
 
 
-    def __getitem__(self, index: int | slice) -> np.ndarray:
+    def __getitem__(self, index: int | slice) -> NDArray[np.float32]:
         """Indexed or sliced Neopixel read"""
         rgb = self.pixel_buffer[index]
         result = ColorMode.RGB.convert_to(rgb, self._color_mode)
 
-        if rgb.shape[-1] > 3 and self.has_W:
+        if self.device.pixel_order.has_W:
             # Put back the white channel to the last dimension if available
             result = np.concatenate([result, rgb[..., 3][..., np.newaxis]], axis=-1)
 
@@ -336,32 +381,33 @@ class Neopixel:
         value = np.clip(np.asarray(value, dtype=np.float32), 0.0, 1.0)
 
         if value.ndim == 0:# a single number applies to the white LED only
-            if not self.has_W:
+
+            #if not self.has_W:
                 #ignore if no white LED can be set
-                return self
+            #    return self
 
             self.pixel_buffer[index, 3] = float(np.clip(value, 0.0, 1.0))
-            return self.auto_show()
+            return self.auto_show() if self.device.pixel_order.has_W else self
 
         if (value.shape[-1] == 2) or (value.shape[-1] > 4):
             raise ValueError("Wrong number of values")
 
         if (value.ndim == 2) and (isinstance(index, int)):
-            # If the value contains an array with multiple pixel values, we try to broadcast them
+            # If the value contains an array with multiple pixel values, we try to broadcast them to a slice in the buffer
             index = slice(index, index+value.shape[0])
 
         if value.shape[-1] == 1: # an array of single numbers is boradcasted to the white pixels only:
-            if not self.has_W:
+            #if not self.has_W:
                 # ignore if no white LED is available
-                return self
+            #    return self
 
-            self.pixel_buffer[index, -1] = value[:, 0]
+            self.pixel_buffer[index, 3] = value[:, 0]
             return self.auto_show()
 
         # The internal pixel buffer is held in ColorMode.RGB
         rgb = (color_mode or self._color_mode).convert_to(value, ColorMode.RGB)
 
-        if (value.shape[-1] > 3) and self.has_W:
+        if (value.shape[-1] > 3): # and self.has_W:
             # Put back the white channel to the last dimension if RGBW
             rgb = np.concatenate([rgb, value[..., 3][..., np.newaxis]], axis=-1)
             self.pixel_buffer[index] = rgb
@@ -463,14 +509,14 @@ class Neopixel:
                 np.linspace(from_value[1], to_value[1], count),
                 np.linspace(from_value[2], to_value[2], count)]
 
-            if self.has_W:
-                if from_value.shape[0] > 3:
-                    rgb.append(np.linspace(from_value[3], to_value[3], count))
+            #if self.has_W:
+            if from_value.shape[0] > 3:
+                rgb.append(np.linspace(from_value[3], to_value[3], count))
 
             gradient = np.stack(rgb, axis=1, dtype=np.float32)
         else: # W only value array
             gradient = np.linspace(from_value, to_value, count)[:, np.newaxis].astype(np.float32)
-    
+
         return self.set_value(index, gradient[:self.num_pixels-index], color_mode=color_mode)
 
 
@@ -544,10 +590,12 @@ class Neopixel:
         """Get a black color value appropriate for the pixel type (RGB or RGBW)."""
         return self.device.pixel_order.blank
     
+    '''
     @property
     def has_W(self) -> bool:
         """Check if the pixel type has a white channel."""
-        return self.pixel_buffer.shape[-1] > 3
+        return self.device.pixel_order.num == 4 #self.pixel_buffer.shape[-1] > 3
+    '''
 
     @property
     def gamma_func(self) -> Callable[[float], float]:
