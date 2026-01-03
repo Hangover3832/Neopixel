@@ -1,23 +1,30 @@
 from abc import ABC, abstractmethod
 from random import random, randint
-from time import sleep
 import numpy as np
-from colors import ColorMode, create_gamma_function, G
+from colors import ColorMode, G
 from neopixel_classes import Neopixel
 from every import Every # https://raw.githubusercontent.com/Hangover3832/every_timer/refs/heads/main/every.py
 from typing import Callable, Tuple
 
 
-class EffectsBaseClass(ABC):
+class NeopixelEffect(ABC):
     def __init__(self, neopixel:Neopixel) -> None:
         self.neopixel: Neopixel = neopixel
 
     @abstractmethod
-    def progress(self):
+    def progress(self) -> 'NeopixelEffect':
+        raise NotImplementedError
+    
+    @abstractmethod
+    def pause(self) -> 'NeopixelEffect':
+        raise NotImplementedError
+
+    @abstractmethod
+    def resume(self) -> 'NeopixelEffect':
         raise NotImplementedError
 
 
-class Fire(EffectsBaseClass):
+class Fire(NeopixelEffect):
     """
     Fire effect for the neopixel_spi library.
 
@@ -49,13 +56,14 @@ class Fire(EffectsBaseClass):
         self.decay_factor = decay_factor
         self.spark_interval_factor = spark_interval_factor
         neopixel.auto_write = True
-        neopixel.gamma_func = G.linear.value
         self.index = 0
         self.start = 0
         self.end = self.neopixel.num_pixels - 1
         self.ignite_spark = Every(0.1, execute_immediately=True).do(self._ignite_spark)
-        self.decay = Every(1.0/30).do(self._decay)
-        self.propagate = Every(spark_propagation_interval).do(self._propagate)
+        self.decay = Every(1.0/30, keep_interval=False).do(self._decay)
+        self.propagate = Every(spark_propagation_interval, keep_interval=False).do(self._propagate)
+        self._propagating: bool = False
+        self._bright: float = 1.0
 
 
     @property
@@ -73,24 +81,28 @@ class Fire(EffectsBaseClass):
         We use only a part of the spectrum,  at the bottom hotter (more blueish)
         at the top colder (more redish) based on the self.spectrum parameter"""
         x = index / (self.neopixel.num_pixels-1)
-        result = float(np.interp(x, (0.0, 1.0), self.spectrum))
+        result = 0.1*random() + float(np.interp(x, (0.0, 1.0), self.spectrum))
         return result
 
+
     def _ignite_spark(self) -> None:
-        self.start = randint(0, self.neopixel.num_pixels // 4) # start at the lower 4rd
-        self.end = randint(self.neopixel.num_pixels - self.neopixel.num_pixels // 4, self.neopixel.num_pixels) # end at the upper 4rd
-        self.index = self.start
-        self.ignite_spark.pause()
-        self.propagate.reset().resume()
+        if not self._propagating:
+            self.start = randint(0, self.neopixel.num_pixels // 4) # start at the lower 4rd
+            self.end = randint(self.neopixel.num_pixels - self.neopixel.num_pixels // 3, self.neopixel.num_pixels) # end at the upper 3rd
+            self.index = self.start
+            self._bright = 0.5 * (1 + random())
+
 
     def _propagate(self) -> None:
         if self.start <= self.index < self.end:
-            self.neopixel.set_temperature(self.index, self.get_indexed_temp(self.index))
+            self._propagating = True
+            self.neopixel.set_temperature(self.index, 
+                     self.get_indexed_temp(self.index), self._bright)
             self.index += 1
         else:
-            # add randomness to the ignition interval
-            self.ignite_spark.resume().interval = self.spark_interval_factor * random()
-            self.propagate.pause()
+            self._propagating = False
+            self.ignite_spark.reset().interval = self.spark_interval_factor * random()
+
 
     def _decay(self) -> None:
         self.neopixel *= self._decay_array
@@ -99,32 +111,58 @@ class Fire(EffectsBaseClass):
         for i in self.neopixel:
             self.neopixel.set_temperature(i, self.get_indexed_temp(i))
 
-    def progress(self) -> None:
+
+    def progress(self) -> 'Fire':
         self.ignite_spark()
         self.propagate()
         self.decay()
+        return self
 
 
-class Meteor(EffectsBaseClass):
+    def pause(self) -> 'Fire':
+        self.ignite_spark.pause()
+        return self
+
+
+    def resume(self) -> 'Fire':
+        self.neopixel.clear()
+        self.ignite_spark.reset().resume().execute()
+        return self
+
+
+
+class Meteor(NeopixelEffect):
     def __init__(self, 
                  neopixel: Neopixel,
                  roll_interval: float = 0.02,
-                 decay_value: float = 0.9
+                 decay_value: float = 0.9,
+                 shoot_intervall: float = 2.0,
                  ) -> None:
         super().__init__(neopixel)
         neopixel.auto_write = True
-        neopixel.color_mode = ColorMode.RGB
+        neopixel.color_mode = ColorMode.HSV
         neopixel.reversed = True
         self.decay_value = decay_value
-        self.shoot = Every(2 * neopixel.num_pixels * roll_interval, execute_immediately=True).do(self._shoot)
-        self.roll = Every(roll_interval).do(self._roll)
+        self.shoot:Every = Every(shoot_intervall * neopixel.num_pixels * roll_interval, execute_immediately=True, keep_interval=False).do(self._shoot)
+        self.roll:Every = Every(roll_interval, keep_interval=False).do(self._roll)
 
     def _shoot(self) -> None:
-        self.neopixel.set_temperature(0, random())
+        # self.neopixel.set_temperature(0, random())
+        self.neopixel[0] = random(), 1.0, 1.0
 
     def _roll(self) -> None:
-        self.neopixel.roll(value=self.neopixel[0] * self.decay_value)
+        self.neopixel.roll(value=self.neopixel[0] * np.array([1., 1., self.decay_value], dtype=np.float32))
 
-    def progress(self):
+    def progress(self) -> 'Meteor':
         self.shoot()
         self.roll()
+        return self
+
+    def pause(self) -> 'Meteor':
+        self.shoot.pause()
+        return self
+
+    def resume(self) -> 'Meteor':
+        self.neopixel.clear()
+        self.shoot.reset().resume().execute()
+        return self

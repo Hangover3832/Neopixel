@@ -29,7 +29,7 @@ class RpiSpiDev(SPIDevice):
         else:
             self._cs = None
 
-        self._spi_buffer: NDArray[np.uint8] | None = None
+        # self._spi_buffer: NDArray[np.uint8] | None = None
 
         # Setup SPI:
         try:
@@ -53,5 +53,4 @@ class RpiSpiDev(SPIDevice):
         if self._cs is not None:
             self._cs.off()
 
-        assert self._spi_buffer is not None
-        self._spi.writebytes2(self._spi_buffer.T.flatten())
+        self._spi.writebytes2(self.spi_buffer.T.flatten())
