@@ -186,13 +186,11 @@ def GammaTest() -> None:
 
     neo = Neopixel(150).to(neo2dev)
     # Create a brightness gradient
-    for i in neo:
-        neo[i] = 0.0, 0.0, i/(neo.num_pixels-1)
-    if neo.device.is_simulated:
-        print()
-
-    neo().close_()
-
+    neo.create_gradient((0.0, 0.0, 0.0),(0.0, 0.0, 1.0)) # brightness gradient
+    neo.create_gradient(1.0, 0.0) # white LED gradient opposite ordered
+    neo()
+    print()
+    neo.close_()
 
 
 def Rainbow(neo: Neopixel):
@@ -256,7 +254,7 @@ def light_show():
     def loop():
         Rainbow(neo)
         Raindrops(neo)
-        neo.reversed = not neo.reversed
+        neo2dev.reversed = not neo2dev.reversed
 
     neo.close_()
 
@@ -264,7 +262,7 @@ def light_show():
 def power_measure():
     lin_gamma = create_gamma_function(np.array([0.0, 1.0]))
     neo = Neopixel(100, color_mode=ColorMode.RGB, gamma_func=lin_gamma).to(neo2dev)
-    neo.watts_per_led = np.array([0.042, 0.042, 0.042, 0.084])
+    neo2dev.watts_per_led = np.array([0.042, 0.042, 0.042, 0.084])
     for i, _ in enumerate(range(5), start=1):
         neo[:] = 1.0/i, 1.0/i, 1.0/i, 1.0/i
         neo()
@@ -274,7 +272,12 @@ def power_measure():
 
 
 def effects():
-    neo = Neopixel(23, brightness=1.).to(neo1dev)
+    """Fire and Meteor effect on 2 devices at ones"""
+
+    neo = Neopixel(23, brightness=1.)
+    neo.to(neo1dev)
+    neo.to(neo2dev)
+
     candle = Fire(
         neo,
         spectrum=(0.35, -0.2),
@@ -291,7 +294,7 @@ def effects():
         )
     
 
-    @Every.While(5)
+    @Every.While(10)
     def run_effects():
         neo.reversed = False
         candle.resume()
@@ -304,6 +307,7 @@ def effects():
         Every.While(1)(meteor.progress) # drop for 10s
         meteor.pause()
         Every.While(1)(meteor.progress) # settle for 1s
+
 
     print()
 
@@ -345,13 +349,14 @@ def graphic_simulator():
 
 if __name__ == "__main__":
     #test_custom_device()
-    basic_tests()
-    show_image()
+    #basic_tests()
+    #show_image()
     GammaTest()
+    quit()
     ColorModeTest()
     power_measure()
-    Neopixel(23).to(neo1dev).clear()().device.close_()
-    Neopixel(150).to(neo2dev).clear()().device.close_()
+    Neopixel(23).to(neo1dev).clear()().close_()
+    Neopixel(150).to(neo2dev).clear()().close_()
     light_show()
     effects()
     #graphic_simulator()

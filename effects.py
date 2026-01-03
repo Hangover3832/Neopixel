@@ -151,7 +151,7 @@ class Meteor(NeopixelEffect):
         self.neopixel[0] = random(), 1.0, 1.0
 
     def _roll(self) -> None:
-        self.neopixel.roll(value=self.neopixel[0] * np.array([1., 1., self.decay_value], dtype=np.float32))
+        self.neopixel.roll(value=self.neopixel[0] * np.array([1., 1., self.decay_value, 1.0], dtype=np.float32))
 
     def progress(self) -> 'Meteor':
         self.shoot()

@@ -28,8 +28,11 @@ class NeopixelDevice(ABC):
         self.is_simulated: bool = False
         self.args: tuple = args
         self.kwargs: dict = kwargs
-        # self._is_open: bool = False
         self._num_pixels: int = 0
+        self.watts_per_led: np.ndarray = np.array([0.081, 0.081, 0.08, 0.09])
+        self._current_power: float = 0.0
+        self.max_power: float = 0.0
+        self.reversed: bool = False
 
 
     @abstractmethod
@@ -57,6 +60,17 @@ class NeopixelDevice(ABC):
         """
 
         #rearange the buffer to the correct pixel order and call write_to_device()
+        watts = self.watts_per_led if self.pixel_order.has_W else np.append(self.watts_per_led[:3], 0.0)
+        self._current_power = np.sum(watts * buffer).astype(float)
+        
+        # limit the power consumption
+        if (self.max_power > 1e-6) and (self._current_power > self.max_power):
+            buffer *= self.max_power/self._current_power
+            self._current_power = self.max_power
+
+        if self.reversed:
+            buffer = buffer[::-1]
+
         buffer = buffer[:, [self.pixel_order.name.index(c) for c in 'RGBW' if c in self.pixel_order.name]]
         self.write_to_device(buffer, device_data)
 
@@ -131,7 +145,6 @@ class NeopixelDevices:
         self.devices: list[dict[str, Any]] = []
         self.num_pixels = num_pixels
 
-
     def add_device(self, device:NeopixelDevice) -> None:
         # Check if device not already in list:
         for dev in self.devices:
@@ -142,10 +155,45 @@ class NeopixelDevices:
         self.devices.append({"device": device, "data": data})
 
 
+    def close_(self):
+        for dev in self.devices:
+            dev["device"].close_()
+
+
+    def remove_device(self, device:NeopixelDevice) -> None:
+        for i, dev in enumerate(self.devices):
+            if dev["device"] is device:
+                device.close_()
+                del self.devices[i]
+                return
+
     def write_to_devices(self, buffer:NDArray[np.float32]) -> Any:
         for device in self.devices:
             device["device"]._write_buffer(buffer, device["data"])
 
+    def __del__(self):
+        for device in self.devices:
+            device["device"].close_()
+
+    @property
+    def num_devices(self) -> int:
+        return len(self.devices)
+    
+    @property
+    def current_power(self) -> float:
+        total_power = 0.0
+        for device in self.devices:
+            total_power += device["device"]._current_power
+        return total_power
+
+    @property
+    def reversed(self):
+        raise RuntimeError("Please read the `reversed` flag from the device.")
+    
+    @reversed.setter
+    def reversed(self, value:bool):
+        for device in self.devices:
+            device["device"].reversed = value
 
 #-----------------------------------------------------------
 class Neopixel:
@@ -179,15 +227,14 @@ class Neopixel:
 
         # Public attributes
         self.kwargs:dict = kwargs
-        self.reversed: bool = False
+        # self.reversed: bool = False
         self.auto_write:bool = auto_write
-        self.watts_per_led: np.ndarray = np.array([0.081, 0.081, 0.08, 0.09])
 
         # Private attributes
         self._num_pixels = num_pixels
         self._color_mode: ColorMode = color_mode
-        self._current_power: float = 0.0
-        self._max_power: float = max_power
+        # self._current_power: float = 0.0
+        # self._max_power: float = max_power
         self._index: int = 0
         self._brightness: float = float(np.clip(brightness, 0., 1.))
         self._gamma_func: Callable = gamma_func or (lambda x: x)
@@ -195,32 +242,20 @@ class Neopixel:
         self._mini_screens: list[np.ndarray] = []
         self._pixel_buffer: NDArray[np.float32] = np.zeros((self._num_pixels, 4), dtype=np.float32)
 
-        self._device: NeopixelDevice | None = None
-        self._device_data: Any = None
+        #self._device: NeopixelDevice | None = None
+        #self._device_data: Any = None
 
-        # self._devices = NeopixelDevices(num_pixels=self._num_pixels)
+        self._devices = NeopixelDevices(num_pixels=self._num_pixels)
 
 
     def to(self, device: NeopixelDevice) -> 'Neopixel':
         """Attach a NeopixelDevice to this Neopixel instance."""
 
-        # self._devices.add_device(device)
-
-        # Close the old device if switching devices
-        if self._device is not None and self._device is not device:
-            self._device.close_()
-
-        self._device = device
-
-        # Capture device-specific data returned from open_
-        self._device_data = self._device.open_(self._num_pixels)
-
+        self._devices.add_device(device)
         return self.auto_show()
 
-
     def close_(self):
-        if self._device is not None:
-            self._device.close_()
+        self._devices.close_()
 
 
     def begin_update(self) -> 'Neopixel':
@@ -307,7 +342,6 @@ class Neopixel:
 
     def _write_buffer(self) -> None:
         """Write pixel data to the Neopixels device"""
-        assert self._pixel_buffer is not None, "Pixel buffer is not initialized."
 
         # Apply brightness and gamma correction
         if self._gamma_func is not None:
@@ -318,20 +352,20 @@ class Neopixel:
         rgb_buffer = np.clip(self._brightness * rgb_buffer, 0.0, 1.0)
 
         # calculate power consumption
-        watts = self.watts_per_led if self.device.pixel_order.has_W else np.append(self.watts_per_led[:3], 0.0)
-        self._current_power = np.sum(watts * rgb_buffer).astype(float)
+        #watts = self.watts_per_led if self.device.pixel_order.has_W else np.append(self.watts_per_led[:3], 0.0)
+        #self._current_power = np.sum(watts * rgb_buffer).astype(float)
 
         # Power consumption limiter
-        if (self._max_power > 1e-6) and (self._current_power > self._max_power):
-            rgb_buffer *= self._max_power/self._current_power
-            self._current_power = self._max_power
+        #if (self._max_power > 1e-6) and (self._current_power > self._max_power):
+        #    rgb_buffer *= self._max_power/self._current_power
+        #    self._current_power = self._max_power
 
-        if self.reversed:
-            rgb_buffer = rgb_buffer[::-1]
+        #if self.reversed:
+        #    rgb_buffer = rgb_buffer[::-1]
 
         # Send data to device with device-specific data:
-        self.device._write_buffer(rgb_buffer, self._device_data)
-
+        self._devices.write_to_devices(rgb_buffer)         
+        
 
     def __setitem__(self, index: int | slice, value: PixelValue) -> None:
         """Indexed or sliced Neopixel write"""
@@ -343,9 +377,9 @@ class Neopixel:
         rgb = self.pixel_buffer[index]
         result = ColorMode.RGB.convert_to(rgb, self._color_mode)
 
-        if self.device.pixel_order.has_W:
+        # if self.device.pixel_order.has_W:
             # Put back the white channel to the last dimension if available
-            result = np.concatenate([result, rgb[..., 3][..., np.newaxis]], axis=-1)
+        result = np.concatenate([result, rgb[..., 3][..., np.newaxis]], axis=-1)
 
         return result
 
@@ -386,8 +420,8 @@ class Neopixel:
                 #ignore if no white LED can be set
             #    return self
 
-            self.pixel_buffer[index, 3] = float(np.clip(value, 0.0, 1.0))
-            return self.auto_show() if self.device.pixel_order.has_W else self
+            self.pixel_buffer[index, 3] = np.clip(value, 0.0, 1.0).astype(np.float32)
+            return self.auto_show()
 
         if (value.shape[-1] == 2) or (value.shape[-1] > 4):
             raise ValueError("Wrong number of values")
@@ -544,10 +578,6 @@ class Neopixel:
         return self.set_value(index, value)
 
 
-    def __del__(self):
-        if self._device is not None:
-            self._device.close_()
-
     def __iter__(self) -> 'Neopixel':
         return self
 
@@ -588,7 +618,7 @@ class Neopixel:
     @property
     def blank(self) -> np.ndarray:
         """Get a black color value appropriate for the pixel type (RGB or RGBW)."""
-        return self.device.pixel_order.blank
+        return PixelOrder.GRBW.blank #self.device.pixel_order.blank
     
     '''
     @property
@@ -637,8 +667,17 @@ class Neopixel:
     @property
     def power_consumption(self) -> float:
         """Returns the total power consumption [0..1]"""
-        return self._current_power
+        return self._devices.current_power
+
+    @property
+    def reversed(self):
+        return self._devices.reversed
     
+    @reversed.setter
+    def reversed(self, value:bool):
+        self._devices.reversed = value
+
+    '''
     @property
     def max_power(self) -> float | None:
         return self._max_power
@@ -647,15 +686,18 @@ class Neopixel:
     def max_power(self, max_power: float) -> None:
         self._max_power = max_power
         self.auto_show()
+    '''
 
     @property
     def pixel_buffer(self) -> np.ndarray:
         assert self._pixel_buffer is not None
         return self._pixel_buffer
 
+    '''
     @property
     def device(self) -> NeopixelDevice:
         if self._device is None:
             raise ValueError("Output device is not set. Use the method `to()` to set the output device")
 
         return self._device
+    '''
