@@ -1,13 +1,14 @@
+from __future__ import annotations
 from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 from neopixel_classes import Neopixel
-from devices import ConsoleSimulationDevice, NeopixelDevice
+from devices import ConsoleSimulationDevice, NeopixelDevice, GraphicSimulation, ConsoleSPISimulationDevice
 from colors import ColorMode, PixelOrder, create_gamma_function, G, SOME_COLORS
 from every import Every # https://raw.githubusercontent.com/Hangover3832/every_timer/refs/heads/main/every.py
 from random import random, randint
-from effects import Fire, Meteor
-from time import sleep
+from effects import Fire, Meteor, NeopixelEffect
+from time import monotonic, sleep
 
 
 try:
@@ -23,7 +24,7 @@ except ModuleNotFoundError:
             """)
 
     neo1dev = ConsoleSimulationDevice()
-    neo2dev = ConsoleSimulationDevice(pixel_order=PixelOrder.GRBW)
+    neo2dev = ConsoleSPISimulationDevice(pixel_order=PixelOrder.GRBW)
 
 
 def test_custom_device():
@@ -53,7 +54,7 @@ def test_custom_device():
         def open_(self) -> Any:
             if super().open_():
                 print(f"Opening Neopixel device...", end='')
-                print(f"There are {self.neopixel.num_pixels} {self.pixel_order.name} pixels")
+                print(f"There are {self.num_pixels} {self.pixel_order.name} pixels")
                 print(f"Opening the chip select device...")
 
 
@@ -64,10 +65,10 @@ def test_custom_device():
     
 
 
-    Neopixel(num := 1000, color_mode=ColorMode.RGB).to(MyNeopixel(param1=1234, param2=5678)).set_value(0, np.random.rand(num, 4))().close_()
+    Neopixel(num := 1000, color_mode=ColorMode.RGB).to(MyNeopixel(param1=1234, param2=5678)).set_value(0, np.random.rand(num, 4,).astype(np.float32))().close_()
     """ 
     equals to:
-        num = 100
+        num = 1000
         dev = MyNeopixel(param1=1234, param2=5678)
         neo = Neopixel(num, color_mode=ColorMode.RGB)
         neo.to(dev)
@@ -78,7 +79,7 @@ def test_custom_device():
 
 
 def basic_tests():
-    n1 = Neopixel(10).to(neo1dev).set_value(0, np.random.rand(10, 3))()
+    n1 = Neopixel(16).to(neo1dev)
     n2 = Neopixel(10).to(neo2dev)
 
     n1[:] = 0.3
@@ -183,16 +184,13 @@ def Rainbow(neo: Neopixel):
         # n.show() [or simply n()]
         # n[-1] = 0.0
 
-    neo.watts_per_led = np.array([0.042, 0.042, 0.042, 0.084])
-    
     # Create a rainbow pattern in the default HSV space
     neo.create_gradient([0.0, 1.0, 1.0], [1.0, 1.0, 1.0])
     #for i in neo:
     #    neo[i] = (i/(neo.num_pixels-1), 1.0, 1.0)
 
-
-    @Every.While(5, n=neo) # repeat for 5s
-    def proceed(n:Neopixel):
+    @Every.While(5) # repeat for 5s
+    def proceed():
         drop()
         roll()
 
@@ -200,8 +198,6 @@ def Rainbow(neo: Neopixel):
 
 
 def Raindrops(neo: Neopixel):
-    neo.gamma_func = G.linear.value
-    
     @Every.every(0.1)
     def drop(n: Neopixel):
         # place a random colored pixel at a random location in a random interval
@@ -251,51 +247,84 @@ def power_measure():
     neo.close_()
 
 
-def fire():
-    candle1 = Fire(
-        Neopixel(23, brightness=0.25).to(neo1dev),
-        spectrum=(0.8, 0.0),
+def effects():
+    neo = Neopixel(23, brightness=1.).to(neo1dev)
+    candle = Fire(
+        neo,
+        spectrum=(0.35, -0.2),
         decay_factor=(0.95, 0.85),
         spark_interval_factor=0.05,
-        spark_propagation_interval=0.01
+        spark_propagation_interval=0.015
         )
 
-    candle2 = Fire(
-        Neopixel(23, brightness=1.0).to(neo2dev),
-        #spectrum=(1.0, 0.0),
-        #decay_factor=(0.95, 0.85),
-        #spark_interval_factor=0.15,
-        #spark_propagation_interval=0.01
+    meteor = Meteor(
+        neo, 
+        decay_value=0.85, 
+        roll_interval=0.025,
+        shoot_intervall=1.5
         )
-
-    # Let the candles burn:
-    while True:
-        candle1.progress()
-        #candle2.progress()
-
-    print()
-
-
-def meteor_shower():
-    meteor = Meteor(Neopixel(23, brightness=1.0).to(neo1dev), 
-                    decay_value=0.95, 
-                    roll_interval=0.02
-                    )
     
+
     while True:
-        meteor.progress()
+        neo.reversed = False
+        candle.resume()
+        Every.While(10)(candle.progress)
+        candle.pause()
+        Every.While(1)(candle.progress) # settle for 1s
+
+        neo.reversed = True
+        meteor.resume()
+        Every.While(10)(meteor.progress) # drop for 10s
+        meteor.pause()
+        Every.While(1)(meteor.progress) # settle for 1s
 
     print()
+
+
+
+def show_image():
+    """Show an image on the neopixel, assuming the pixels are aranged 32x8, line by line."""
+
+    from PIL import Image
+
+    width = 32
+    height = 8
+    num = width * height
+
+    dev = ConsoleSimulationDevice(pixel_order=PixelOrder.GRBW)
+    dev.split_lines = width
+    dev.inverse = False
+    dev.led_char = '█'
+
+    neo = Neopixel(num, color_mode=ColorMode.RGB).to(dev)
+
+    img: Image.Image = Image.open('merry_xmas.png')
+    for gamma in G:
+        print(f"Gamma={gamma.name}")
+        neo.gamma_func = gamma.value
+        neo.display_image(0, img, (width, height))
+        neo()
+        print()
+
+
+
+def graphic_simulator():
+
+    dev = GraphicSimulation(horizontal=True, led_size=10)
+    neo = Neopixel(10).to(dev)
+    neo.create_gradient((0.0, 1.0, 1.0), (1.0, 1.0, 1.0))()
+    dev.close_()
 
 
 if __name__ == "__main__":
-    test_custom_device()
+    #test_custom_device()
     basic_tests()
+    show_image()
     GammaTest()
     ColorModeTest()
     power_measure()
-    Neopixel(23).to(neo1dev).clear()()
-    Neopixel(150).to(neo2dev).clear()()
+    Neopixel(23).to(neo1dev).clear()().device.close_()
+    Neopixel(150).to(neo2dev).clear()().device.close_()
     # light_show()
-    fire()
-    #meteor_shower()
+    effects()
+    #graphic_simulator()

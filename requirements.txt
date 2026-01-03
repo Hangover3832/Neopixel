@@ -1,0 +1,4 @@
+numpy
+spidev
+gpiozero
+Pillow
