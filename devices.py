@@ -6,7 +6,8 @@ from neopixel_classes import NeopixelDevice #, Neopixel
 from colors import PixelOrder
 import tkinter as tk
 
-class Spi_Clock(Enum): # SPI clock rates
+class Spi_Clock_Rates(Enum):
+    # SPI clock rates
     CLOCK_400KHZ  = 1_625_000
     CLOCK_800KHZ  = 3_250_000
     CLOCK_1200KHZ = 6_500_000
@@ -14,6 +15,23 @@ class Spi_Clock(Enum): # SPI clock rates
 
 #-----------------------------------------------------------
 class SPIDevice(NeopixelDevice):
+    """
+    **Base class for SPI based Neopixel devices.**</br>
+    Implements the encoding of pixel data to SPI bit patterns.
+    The actual SPI transmission must be implemented by child classes.
+
+    1 SPI byte encodes 2 bits of pixel data:
+        '10' -> 0xC0
+        '11' -> 0xCC
+        '00' -> 0x80
+        '01' -> 0x8C
+    
+    1 pixel = 8 bits per color channel
+    For RGB pixels: 1 pixel = 24 bits = 12 SPI bytes
+    For RGBW pixels: 1 pixel = 32 bits = 16 SPI bytes
+
+    Child classes can access the encoded SPI byte buffer via the 'spi_buffer' property.
+    """
 
     SPI_HIGH_BIT   = 0xC0
     SPI_LOW_BIT    = 0x80
@@ -42,24 +60,9 @@ class SPIDevice(NeopixelDevice):
         return result
 
 
-    """
-    def set_neopixel(self, neopixel: Neopixel):
-        super().set_neopixel(neopixel)
-        if self._pixel_order.num == 4:
-            self._double_bits_per_pixel = 16
-            self._msb_mask = 0x80000000
-            self._c_mask = 0xFFFFFFFF
-        else:
-            self._double_bits_per_pixel = 12
-            self._msb_mask = 0x800000
-            self._c_mask = 0xFFFFFF
-
-        # Pre-allocate buffer for the encoded bits
-        self._spi_buffer = np.zeros([self._double_bits_per_pixel, self.neopixel.num_pixels], dtype=np.uint8)
-    """
-
-
     def write_to_device(self, buffer: NDArray[np.float32]) -> Any:
+        """Encode pixel data to SPI byte patterns."""
+
         rgb_buffer = self._to_uint32(buffer)
 
         # shift out 2 bits of each pixel and encode them to a byte for SPI transmission:
@@ -85,6 +88,11 @@ class SPIDevice(NeopixelDevice):
 
 #-----------------------------------------------------------
 class ConsoleSimulationDevice(NeopixelDevice):
+    """
+    A console based Neopixel device simulation.
+    It prints colored circles to the console to represent the Neopixel colors.
+    You can configure line endings, line splits, white LED's and the character used to represent LEDs.
+    """
 
     def __init__(self, *, pixel_order:PixelOrder=PixelOrder.GRB, **kwargs) -> None:
         super().__init__(pixel_order=pixel_order, custom_cs=None, **kwargs)
@@ -121,6 +129,11 @@ class ConsoleSimulationDevice(NeopixelDevice):
 
 #-----------------------------------------------------------
 class ConsoleSPISimulationDevice(SPIDevice):
+    """
+    A console based Neopixel device simulation for SPI based Neopixel devices.
+    It prints colored circles to the console to represent the Neopixel colors.
+    This class is made for testing SPI based Neopixel devices.
+    """
 
     def __init__(self, *, pixel_order:PixelOrder=PixelOrder.GRB, **kwargs) -> None:
         super().__init__(pixel_order=pixel_order, custom_cs=None, **kwargs)
@@ -158,7 +171,10 @@ class ConsoleSPISimulationDevice(SPIDevice):
 
 #-----------------------------------------------------------
 class GraphicSimulation(NeopixelDevice):
-    """This really does not do so very well...."""
+    """
+    A graphical Neopixel device simulation using tkinter.
+    This really does not do very well....
+    """
 
     def print_hello(self):
         print("Hello")

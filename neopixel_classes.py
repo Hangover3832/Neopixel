@@ -13,8 +13,11 @@ PixelValue = NDArray[np.float32] | list[float] | tuple[float, ...] | float | int
 
 #-----------------------------------------------------------
 class NeopixelDevice(ABC):
-    """Abstract base class for Neopixel devices.
-    Custom Neopixel devices should inherit from this class and implement the `write_to_device()` method.
+    """
+    Abstract base class for Neopixel devices.
+    This class defines the interface for Neopixel devices.
+    :param pixel_order: The pixel order used by the Neopixel device.
+    :type pixel_order: PixelOrder
     """
 
     def __init__(self, *args, pixel_order:PixelOrder = PixelOrder.GRB, **kwargs) -> None:
@@ -30,11 +33,25 @@ class NeopixelDevice(ABC):
 
     @abstractmethod
     def write_to_device(self, buffer:NDArray[np.float32]) -> Any:
+        """Write the given buffer to the Neopixel device.
+        Override this method in subclasses to implement device-specific writing logic.
+
+        :param buffer: A 2D array of shape (num_pixels, num_channels) containing pixel values.
+        :type buffer: np.ndarray[[float, ...], [float, ...]]
+        """
         raise NotImplementedError
 
 
     def _write_buffer(self, buffer:NDArray[np.float32]) -> Any:
-        """rearange the buffer to the correct pixel order and call write_to_device()"""
+        """
+        Write the given buffer to the Neopixel device after rearranging it to match the pixel order.
+
+        :param buffer: A 2D array of shape (num_pixels, num_channels) containing pixel values.
+        :type buffer: np.ndarray[[float, ...], [float, ...]]
+        :returns: The result of the write_to_device() method.
+        """
+
+        #rearange the buffer to the correct pixel order and call write_to_device()
         buffer = buffer[:, [self.pixel_order.name.index(c) for c in 'RGBW' if c in self.pixel_order.name]]
         self.write_to_device(buffer)
 
@@ -45,21 +62,21 @@ class NeopixelDevice(ABC):
 
 
     def _to_uint32(self, buffer:NDArray[np.float32]) -> NDArray[np.uint32]:
-        """Convert the [..., [float32, ...]] buffer to a single [..., uint32] value for each pixel."""
+        """Convert the 2D buffer to 1D uint32."""
         b = self._to_uint8(buffer).astype(np.uint32)
         shifts = np.array([24, 16, 8, 0], dtype=np.uint32) if self.pixel_order.num == 4 else np.array([16, 8, 0], dtype=np.uint32)
         return np.bitwise_or.reduce(b << shifts, axis=1, dtype=np.uint32)
 
 
     def open_(self) -> Any:
-        """Open the Neopixel device."""
+        """Open the Neopixel device. Override this method in subclasses to implement device-specific opening logic."""
         result = not self._is_open
         self._is_open = True
         return result
 
 
     def close_(self) -> Any:
-        """Close the Neopixel device."""
+        """Close the Neopixel device. Override this method in subclasses to implement device-specific closing logic."""
         result = self._is_open
         self._is_open = False
         return result
@@ -71,6 +88,8 @@ class NeopixelDevice(ABC):
             self.close_()
 
     def set_num_pixels(self, num:int) -> None:
+        """Set the number of pixels for the Neopixel device.
+        Override this method in subclasses if needed in case the number of pixels changes."""
         if num <= 0:
             raise ValueError("Error: Number of pixels must be > 0")
         self._num_pixels = num
@@ -91,33 +110,24 @@ class NeopixelDevice(ABC):
         self.set_num_pixels(num)
 
 
-    """
-    def set_neopixel(self, neopixel: Neopixel) -> None:
-        '''Attach a Neopixel instance to this device.'''
-        self._neopixel = neopixel
-  
-
-            @property
-    def neopixel(self) -> Neopixel:
-        if self._neopixel is None:
-            raise ValueError("`Error: neopixel` attribute not set. \
-                             Use the `.to() method to attach the device to the Neopixel.")
-        return self._neopixel
-    
-    @neopixel.setter
-    def neopixel(self, neopixel:Neopixel) -> None:
-        self.set_neopixel(neopixel)
-
-    @property
-    def pixel_buffer(self) -> NDArray[np.float32]:
-        if self.neopixel._pixel_buffer is None:
-            raise RuntimeError("Error: Neopixel buffer is not set.")
-        return self.neopixel._pixel_buffer
-    """
-
-
 #-----------------------------------------------------------
 class Neopixel:
+    """
+    Main Neopixel class that manages pixel data and interfaces with a NeopixelDevice.
+
+    :param num_pixels: Number of pixels in the Neopixel strip.
+    :type num_pixels: int
+    :param gamma_func: A function for gamma correction. Defaults to None.
+    :type gamma_func: Callable | None
+    :param color_mode: The color mode used for pixel values. Defaults to ColorMode.HSV.
+    :type color_mode: ColorMode
+    :param brightness: Brightness level (0.0 to 1.0). Defaults to 1.0.
+    :type brightness: float
+    :param auto_write: If True, changes are automatically written to the device. Defaults to False.
+    :type auto_write: bool
+    :param max_power: Maximum power consumption limit. Defaults to 0.0 (no limit).
+    :type max_power: float
+    """
 
     def __init__(self, 
             num_pixels:int,
@@ -155,9 +165,10 @@ class Neopixel:
         is_new = self._pixel_buffer is None
         self._device = device
         device.num_pixels = self._num_pixels
-        if is_new:
+
+        if is_new: # first time setup of pixel buffer
             self._pixel_buffer = np.zeros((self._num_pixels, device.pixel_order.num), dtype=np.float32)
-        # self._device.neopixel = self
+
         self._device.open_()
         return self if is_new else self.auto_show()
 
@@ -251,7 +262,7 @@ class Neopixel:
 
     def _write_buffer(self) -> None:
         """Write pixel data to the Neopixels device"""
-
+        assert self._pixel_buffer is not None, "Pixel buffer is not initialized."
 
         # Apply brightness and gamma correction
         if self._gamma_func is not None:
@@ -278,11 +289,12 @@ class Neopixel:
 
 
     def __setitem__(self, index: int | slice, value: PixelValue) -> None:
-        """Indexed or sliced Neopixel access"""
+        """Indexed or sliced Neopixel write"""
         self.set_value(index, value)
 
 
     def __getitem__(self, index: int | slice) -> np.ndarray:
+        """Indexed or sliced Neopixel read"""
         rgb = self.pixel_buffer[index]
         result = ColorMode.RGB.convert_to(rgb, self._color_mode)
 
@@ -308,9 +320,19 @@ class Neopixel:
 
     def set_value(self, index: PixelIndex, value: PixelValue, color_mode: ColorMode | None = None) -> 'Neopixel':
         """
-        This is the core routine that writes pixel value at index to self.pixel_buffer:
-        if value is a single number, it affects the White LED only in a RGBW stripe.
+        This is the core routine that writes pixel value at index to self.pixel_buffer.
+        
+        :param index: Pixel index number(s)
+        :type index: int or slice
+        :param value: Pixel value. 
+            If value is a number, it affects the White LED only in a RGBW stripe. A non RGBW stripe, it will ignored in this case.
+        :type value: number or array like
+        :param color_mode: The color mode of the provided value. If None, the current color mode of the Neopixel instance is used.
+        :type color_mode: ColorMode | None
+        :returns: The current instance of Neopixel.
+        :rtype: Neopixel
         """
+
         value = np.clip(np.asarray(value, dtype=np.float32), 0.0, 1.0)
 
         if value.ndim == 0:# a single number applies to the white LED only
@@ -332,7 +354,7 @@ class Neopixel:
             if not self.has_W:
                 # ignore if no white LED is available
                 return self
-            
+
             self.pixel_buffer[index, -1] = value[:, 0]
             return self.auto_show()
 
@@ -357,12 +379,12 @@ class Neopixel:
         """Fill all pixels with a given value"""
         return self.set_value(slice(None), value=value, color_mode=color_mode)
 
-
     def clear(self) -> 'Neopixel':
         """Clear all pixels by setting them to black."""
         return self.fill(self.blank, color_mode=ColorMode.RGB)
 
     def auto_show(self) -> 'Neopixel':
+        """In auto write mode, show the current pixel buffer if the update counter is 0"""
         return self.show() if self.auto_write and self._update_counter <= 0 else self
 
     def show(self) -> 'Neopixel':
@@ -404,9 +426,27 @@ class Neopixel:
     def create_gradient(self, 
                         from_value:PixelValue, 
                         to_value:PixelValue, 
-                        index:int=0, count:int=0, 
+                        index:int=0, 
+                        count:int=0, 
                         color_mode:ColorMode | None = None) -> 'Neopixel':
-        """Create a color gradient. If count=0, the whole pixel array is used"""
+        
+        """
+        Create a color gradient from `from_value` to `to_value` starting at `index` for `count` pixels.
+        If `count` is 0, the gradient will fill up to the end of the pixel strip.
+
+        :param from_value: The starting color value of the gradient.
+        :type from_value: PixelValue
+        :param to_value: The ending color value of the gradient.
+        :type to_value: PixelValue
+        :param index: The starting index for the gradient. Defaults to 0.
+        :type index: int
+        :param count: The number of pixels to fill with the gradient. If 0, fills to the end of the strip. Defaults to 0.
+        :type count: int
+        :param color_mode: The color mode of the provided values. If None, the current color mode of the Neopixel instance is used.
+        :type color_mode: ColorMode | None
+        :returns: The current instance of Neopixel.
+        :rtype: Neopixel
+        """
 
         from_value = np.asarray(from_value, dtype=np.float32)
         to_value = np.asarray(to_value, dtype=np.float32)

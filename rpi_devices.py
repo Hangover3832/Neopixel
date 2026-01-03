@@ -1,7 +1,7 @@
 from typing import Any, Literal
 import gpiozero # type: ignore
 from spidev import SpiDev # type: ignore
-from devices import Spi_Clock
+from devices import Spi_Clock_Rates as Spi_Clock
 import numpy as np
 from numpy.typing import NDArray
 from devices import SPIDevice
@@ -14,7 +14,7 @@ class RpiSpiDev(SPIDevice):
                  *, 
                  device:Literal[0, 1], 
                  pixel_order: PixelOrder = PixelOrder.GRB,
-                 clock_rate:Spi_Clock=Spi_Clock.CLOCK_800KHZ,
+                 clock_rate:Spi_Clock = Spi_Clock.CLOCK_800KHZ,
                  custom_cs: int | None = None,
                  **kwargs) -> None:
 
