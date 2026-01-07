@@ -108,13 +108,6 @@ CUSTOM_GAMMA = np.array([
     1.0     # value for 100% brightness
 ]) # insert more values in between if desired
 
-#LINEAR_GAMMA = np.array([0.0, 1.0])
-#INVERSE_GAMMA = np.array([1.0, 0.0])
-
-SQUARE_GAMMA = np.array([0.0, 0.25, 1.0])
-
-SIMPLE_GAMMA = np.array([0.0, 0.214, 1.0]) # sRGB 21.4% middle grey
-"""This is quite close to the square gamma where the middle grey is 25%"""
 
 DEFAULT_GAMMA = np.array([0.0, 0.11, 0.18, 0.35, 1.0]) # 18% middle grey + my own magic
 """ 
@@ -122,9 +115,6 @@ I created this masterpiece of gamma based on the 18% middle grey principle
 (Munsell, Sloan & Godlove, see https://en.wikipedia.org/wiki/Middle_gray) and just by my own subjective
 perception of brightness on a particular neopixel stripe.
 """
-
-SRGB_GAMMA = np.array([0.0, 0.15, 0.214, 0.37, 1.0])
-# like default gamma but shifted towards sRGB
 
 NO_DARK_GAMMA = np.array([0.02, 1.0])
 # no more dark pixels :-()
@@ -173,22 +163,23 @@ class G(Enum):
         plt.show()
 
 
-    default = create_gamma_function(DEFAULT_GAMMA)
-    srgb    = create_gamma_function(SRGB_GAMMA)
-    simple  = create_gamma_function(SIMPLE_GAMMA)
-    no_dark = create_gamma_function(NO_DARK_GAMMA)
-    crazy   = create_gamma_function(CRAZY_GAMMA)
-    square  = create_gamma_function(SQUARE_GAMMA)
-    #linear  = create_gamma_function(LINEAR_GAMMA)
-    #inverse = create_gamma_function(INVERSE_GAMMA)
-    
+GAMMA = {
+    'default': create_gamma_function(DEFAULT_GAMMA),
+    'no_dark': create_gamma_function(NO_DARK_GAMMA),
+    'crazy': create_gamma_function(CRAZY_GAMMA),
+    'gamma20': lambda x:x**2,
+    'gamma22': lambda x:x**2.2,
+    'gamma25': lambda x:x**2.5,
+    'srgb': lambda x:x**2.22432,
+}
+
 
 custom_gamma = create_gamma_function(CUSTOM_GAMMA)
 
 
 def main():
     test_gamma = lambda x: .5 + np.sin(x * 2 * np.pi) / 2
-    G.plot([test_gamma])
+    G.plot([value for key, value in GAMMA.items()])
 
 
 if __name__ == '__main__':

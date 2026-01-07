@@ -2,7 +2,7 @@ from enum import Enum
 from typing import Any, Callable
 from numpy.typing import NDArray
 import numpy as np
-from neopixel_classes import NeopixelDevice #, Neopixel
+from neopixel_classes import NeopixelDevice, Neopixel
 from colors import PixelOrder
 import tkinter as tk
 
@@ -37,9 +37,9 @@ class SPIDevice(NeopixelDevice):
     SPI_HIGH_BIT2  = 0x0C
     SPI_LOW_BIT2   = 0x08
 
-    def __init__(self, *, pixel_order:PixelOrder=PixelOrder.GRB, **kwargs) -> None:
+    def __init__(self, *, pixel_order:PixelOrder=PixelOrder.GRB, gamma_function: Callable | None = None, **kwargs) -> None:
 
-        super().__init__(pixel_order=pixel_order, **kwargs)
+        super().__init__(pixel_order=pixel_order, gamma_function=gamma_function, **kwargs)
 
         if self._pixel_order.num == 4:
             self._double_bits_per_pixel = 16
@@ -51,9 +51,9 @@ class SPIDevice(NeopixelDevice):
             self._c_mask = 0xFFFFFF
 
 
-    def open_(self, num_pixels:int) -> NDArray[np.uint8]:
+    def open_(self, neopixel:Neopixel) -> NDArray[np.uint8]:
         """Open device and create SPI buffer to be stored in Neopixel instance."""
-        super().open_(num_pixels)
+        super().open_(neopixel)
         return np.zeros([self._double_bits_per_pixel, self._num_pixels], dtype=np.uint8)
 
 
@@ -66,8 +66,6 @@ class SPIDevice(NeopixelDevice):
         :type device_data: np.ndarray[np.uint8]
         :raises ValueError: If device_data is None
         """
-        # if device_data is None:
-        #   raise ValueError("SPIDevice requires device_data (spi_buffer) to be passed from Neopixel._write_buffer()")
 
         rgb_buffer = self._to_uint32(buffer)
 
@@ -95,8 +93,8 @@ class ConsoleSimulationDevice(NeopixelDevice):
     You can configure line endings, line splits, and the character used to represent LEDs.
     """
 
-    def __init__(self, *, pixel_order:PixelOrder=PixelOrder.GRB, **kwargs) -> None:
-        super().__init__(pixel_order=pixel_order, custom_cs=None, **kwargs)
+    def __init__(self, *, pixel_order:PixelOrder=PixelOrder.GRB, gamma_function: Callable | None = None, **kwargs) -> None:
+        super().__init__(pixel_order=pixel_order, custom_cs=None, gamma_function=gamma_function, **kwargs)
         self.is_simulated = True
         self.line_end: str = ''
         self.split_lines: int = 0
@@ -137,8 +135,8 @@ class ConsoleSPISimulationDevice(SPIDevice):
     This class is made for testing SPI based Neopixel devices.
     """
 
-    def __init__(self, *, pixel_order:PixelOrder=PixelOrder.GRB, **kwargs) -> None:
-        super().__init__(pixel_order=pixel_order, custom_cs=None, **kwargs)
+    def __init__(self, *, pixel_order:PixelOrder=PixelOrder.GRB, gamma_function: Callable | None = None, **kwargs) -> None:
+        super().__init__(pixel_order=pixel_order, custom_cs=None, gamma_function=gamma_function, **kwargs)
         self.is_simulated = True
         self.line_end: str = ''
         self.led_char: str = "\u25CF"
@@ -185,12 +183,13 @@ class GraphicSimulation(NeopixelDevice):
     def __init__(self, 
                  *, 
                  pixel_order: PixelOrder = PixelOrder.RGB, 
+                 gamma_function: Callable | None = None, 
                  led_size: int = 25,
                  horizontal: bool = False,
                  split: int = 0,
                  **kwargs) -> None:
         
-        super().__init__(pixel_order=pixel_order, **kwargs)
+        super().__init__(pixel_order=pixel_order, gamma_function=gamma_function, **kwargs)
 
         self.horizontal = horizontal
         self.split = split
@@ -201,9 +200,9 @@ class GraphicSimulation(NeopixelDevice):
         self.canvas.pack()
 
 
-    def open_(self, num_pixels):
-        super().open_(num_pixels)
-        width, height = self.led_size, self.led_size*(self.num_pixels)
+    def open_(self, neopixel:Neopixel):
+        super().open_(neopixel=neopixel)
+        width, height = self.led_size, self.led_size*(neopixel.num_pixels)
         if self.horizontal:
             width, height = height, width
 

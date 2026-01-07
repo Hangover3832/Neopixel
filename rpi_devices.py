@@ -1,4 +1,4 @@
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 import gpiozero # type: ignore
 from spidev import SpiDev # type: ignore
 from devices import Spi_Clock_Rates as Spi_Clock
@@ -14,6 +14,7 @@ class RpiSpiDev(SPIDevice):
                  *, 
                  device:Literal[0, 1], 
                  pixel_order: PixelOrder = PixelOrder.GRB,
+                 gamma_function: Callable | None = None, 
                  clock_rate:Spi_Clock = Spi_Clock.CLOCK_800KHZ,
                  custom_cs: int | None = None,
                  **kwargs) -> None:
@@ -22,7 +23,7 @@ class RpiSpiDev(SPIDevice):
         if device not in [0, 1]:
             raise ValueError("Error: device number must be 0 or 1.")
 
-        super().__init__(pixel_order=pixel_order, custom_cs=custom_cs, **kwargs)
+        super().__init__(pixel_order=pixel_order, gamma_function=gamma_function, **kwargs)
 
         if custom_cs is not None:
             self._cs = gpiozero.OutputDevice(custom_cs, active_high=False, initial_value=True)
