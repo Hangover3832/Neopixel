@@ -353,10 +353,7 @@ def sclicing_test():
     v = (0.25, 0.0, 0.0, 1.0)
     neo = Neopixel(64, color_mode=ColorMode.RGB).to(neo2dev)
     print(neo.pixel_buffer.shape)
-    #neo._pixel_buffer = neo.pixel_buffer.reshape([8,8,4])
-    print(neo.pixel_buffer.shape)
-    # set pixel at [2, 5] to v:
-    neo[0:8] = v
+    neo[1] = v
 
     neo()
 
