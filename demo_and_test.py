@@ -3,18 +3,18 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 from neopixel_classes import Neopixel
-from devices import ConsoleSimulationDevice, NeopixelDevice, GraphicSimulation, ConsoleSPISimulationDevice
+from devices import ConsoleSimulationDevice, NeopixelDevice, ConsoleSPISimulationDevice
 from colors import ColorMode, PixelOrder, create_gamma_function, SOME_COLORS, GAMMA
 from every import Every # https://raw.githubusercontent.com/Hangover3832/every_timer/refs/heads/main/every.py
 from random import random, randint
-from effects import Fire, Meteor, NeopixelEffect
+from effects import Fire, Meteor
 from time import monotonic, sleep
 
 
 try:
     from rpi_devices import RpiSpiDev # type: ignore
 
-    neo1dev = RpiSpiDev(device=0)
+    neo1dev = RpiSpiDev(device=0, pixel_order=PixelOrder.GRBW)
     neo2dev = RpiSpiDev(device=1, pixel_order=PixelOrder.GRB)
 
 except ModuleNotFoundError:
@@ -349,28 +349,33 @@ def show_image():
     neo()
 
 
+def on_write(buffer: NDArray[np.float32]):
+    print("RGB", buffer)
+    return buffer
+
+
 def sclicing_test():
-    v = (0.25, 0.0, 0.0, 1.0)
-    neo = Neopixel(64, color_mode=ColorMode.RGB).to(neo2dev)
+    v = (0.666, 1.0, 0.5, 0.)
+    #neo2dev.on_write_buffer = on_write
+    neo2dev.gamma_function = GAMMA['srgb']
+    neo = Neopixel((32, 8), color_mode=ColorMode.HSV, brightness=0.25)
     print(neo.pixel_buffer.shape)
-    neo[1] = v
+    #neo.to(neo1dev)
+    neo.to(neo2dev)
+
+    for i in range(8):
+        neo[i, 0:i+1] = v
+
+    neo[1::2] = neo[1::2][:, ::-1]
 
     neo()
 
 
-def graphic_simulator():
-    #no, don't
-    dev = GraphicSimulation(horizontal=True, led_size=10)
-    neo = Neopixel(10).to(dev)
-    neo.create_gradient((0.0, 1.0, 1.0), (1.0, 1.0, 1.0))()
-    dev.close_()
-
-
 if __name__ == "__main__":
-    Neopixel(23).to(neo1dev).clear()().close_()
+    Neopixel(150).to(neo1dev).clear()().close_()
     Neopixel(256).to(neo2dev).clear()().close_()
 
-    test_custom_device()
+    #test_custom_device()
     #basic_tests()
     #show_image()
     #GammaTest()
@@ -378,5 +383,4 @@ if __name__ == "__main__":
     #power_measure()
     #light_show()
     #effects()
-    #graphic_simulator() <- don't
     sclicing_test()

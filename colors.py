@@ -47,7 +47,7 @@ class ColorMode(Enum):
     def kelvin_to_rgb(cls, kelvin: float) -> np.ndarray:
         return np.array(temperature_to_RGB(kelvin))
 
-    def convert_to(self, value: NDArray[np.float32], to_mode:'ColorMode') -> np.ndarray:
+    def convert_to(self, value: NDArray[np.float32], to_mode:'ColorMode') -> NDArray[np.float32]:
         """
         Convert color value from this color mode to the specified color mode.
         Note that the color conversion function mode_to_mode() must be globally avilable.
@@ -60,12 +60,17 @@ class ColorMode(Enum):
         :rtype: np.ndarray"""
 
         if self == to_mode:
-            return value[..., :3]
+            return value
 
         convert_function = f"{self.name.lower()}_to_{to_mode.name.lower()}"
-        function = globals().get(convert_function)
+        function:Callable[[NDArray[np.float32]], NDArray[np.float32]] | None = globals().get(convert_function)
         if function and callable(function):
-            return np.asarray(function(value))
+            converted = function(value)
+            if value.shape[-1] == 4:
+                # preserve the white channel if present
+                converted = np.concatenate((converted[..., :3], value[..., 3:4]), axis=-1)
+            return converted
+
 
         raise NotImplementedError(
             f"{self.name} to {to_mode.name} is not implemented: `{convert_function}({self.name.lower()}:NDArray[np.float32]) -> NDArray[np.float32]`"

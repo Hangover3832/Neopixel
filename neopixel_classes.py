@@ -41,7 +41,6 @@ class NeopixelDevice(ABC):
         self.on_uint32: Callable[[NDArray[np.uint32]], NDArray[np.uint32]] | None = None
 
 
-
     @abstractmethod
     def write_to_device(self, buffer:NDArray[np.float32], device_data: Any) -> Any:
         """Write the given buffer to the Neopixel device.
@@ -68,8 +67,6 @@ class NeopixelDevice(ABC):
 
         #reduce the array to 2D if neccessary:
         buffer = buffer.reshape(-1, buffer.shape[-1])
-
-
         buffer = np.clip(self.brightness * self.gamma_function(buffer), 0.0, 1.0)
 
         if self.on_write_buffer is not None:
@@ -221,7 +218,7 @@ class Neopixel:
     """
 
     def __init__(self, 
-            num_pixels:int,
+            shape: int | tuple[int, ...] | list[int] | NDArray[np.int32],
             *,
             # gamma_func: Callable | None = None,
             color_mode: ColorMode = ColorMode.HSV,
@@ -236,13 +233,15 @@ class Neopixel:
         self.auto_write:bool = auto_write
 
         # Private attributes
-        self._num_pixels = num_pixels
+        shape = np.asarray(shape)
+        self._num_pixels = np.prod(shape, dtype=int)
         self._color_mode: ColorMode = color_mode
         self._index: int = 0
         self._brightness: float = np.clip(brightness, 0., 1., dtype=float)
         self._update_counter: int = 0
         self._mini_screens: list[np.ndarray] = []
-        self._pixel_buffer: NDArray[np.float32] = np.zeros((self._num_pixels, 4), dtype=np.float32)
+        shape = np.append(shape, 4) # add RGBW dimesion
+        self._pixel_buffer: NDArray[np.float32] = np.zeros(shape, dtype=np.float32)
         self._devices = NeopixelDevices(neopixel=self)
 
 
@@ -353,48 +352,16 @@ class Neopixel:
         """Write pixel data to the Neopixels device"""
 
         # Apply brightness and gamma correction
-        rgb_buffer = np.clip(self._brightness * self.pixel_buffer.copy(), 0.0, 1.0)
-
-        #if self._gamma_func is not None:
-        #    rgb_buffer = self._gamma_func(rgb_buffer)
-
-        # calculate power consumption
-        #watts = self.watts_per_led if self.device.pixel_order.has_W else np.append(self.watts_per_led[:3], 0.0)
-        #self._current_power = np.sum(watts * rgb_buffer).astype(float)
-
-        # Power consumption limiter
-        #if (self._max_power > 1e-6) and (self._current_power > self._max_power):
-        #    rgb_buffer *= self._max_power/self._current_power
-        #    self._current_power = self._max_power
-
-        #if self.reversed:
-        #    rgb_buffer = rgb_buffer[::-1]
+        rgb_buffer = np.clip(self._brightness * self.pixel_buffer, 0.0, 1.0)
 
         # Send data to device with device-specific data:
-        self._devices.write_to_devices(rgb_buffer)         
+        self._devices.write_to_devices(rgb_buffer)       
+
         
-
-    def __setitem__(self, index: int | slice, value: PixelValue) -> None:
-        """Indexed or sliced Neopixel write"""
-        self.set_value(index, value)
-
-
-    def __getitem__(self, index: int | slice) -> NDArray[np.float32]:
-        """Indexed or sliced Neopixel read"""
-        rgb = self.pixel_buffer[..., index]
-        result = ColorMode.RGB.convert_to(rgb, self._color_mode)
-
-        # if self.device.pixel_order.has_W:
-            # Put back the white channel to the last dimension if available
-        result = np.concatenate([result, rgb[..., 3][..., np.newaxis]], axis=-1)
-
-        return result
-
-
     def __len__(self) -> int:
         """Get the number of pixels in the strip."""
-        return self.pixel_buffer.shape[0]
-    
+        return self._num_pixels
+
 
     def set_temperature(self, index:PixelIndex, temperature:float, brightness:float = 1.0) -> 'Neopixel':
         """Set pixel value at index using an approximation for the black body heat radiation.
@@ -404,12 +371,40 @@ class Neopixel:
         return self.auto_show()
 
 
+    def __setitem__(self, index, value: PixelValue) -> None:
+        """Sliced Neopixel write"""
+
+        if isinstance(index, (int, slice)):
+            index = (index,)
+
+        if isinstance(value, (float, int)):
+            # Set the white LED only
+            self._pixel_buffer[*index, ..., 3] = float(value)
+            return
+
+        value = np.asarray(value)
+        # Preserve the white LED if the value is [R, G, B] only
+        self._pixel_buffer[*index, ..., :len(value)] = self.color_mode.convert_to(value, ColorMode.RGB)
+
+
+    def __getitem__(self, index) -> NDArray[np.float32]:
+        """Indexed or sliced Neopixel read"""
+        rgb = self.pixel_buffer[index]
+        result = ColorMode.RGB.convert_to(rgb, self._color_mode)
+
+        # if self.device.pixel_order.has_W:
+            # Put back the white channel to the last dimension if available
+        #result = np.concatenate([result, rgb[..., 3][..., np.newaxis]], axis=-1)
+
+        return result
+
+
     def set_value(self, index: PixelIndex, value: PixelValue, color_mode: ColorMode | None = None) -> 'Neopixel':
         """
         This is the core routine that writes pixel value at index to self.pixel_buffer.
-        
+
         :param index: Pixel index number(s)
-        :type index: int or slice
+        :type index: int, slice, list, tuple
         :param value: Pixel value. 
             If value is a number, it affects the White LED only in a RGBW stripe. A non RGBW stripe, it will ignored in this case.
         :type value: number or array like
@@ -448,19 +443,22 @@ class Neopixel:
         # The internal pixel buffer is held in ColorMode.RGB
         rgb = (color_mode or self._color_mode).convert_to(value, ColorMode.RGB)
 
+        '''
         if (value.shape[-1] > 3): # and self.has_W:
             # Put back the white channel to the last dimension if RGBW
             rgb = np.concatenate([rgb, value[..., 3][..., np.newaxis]], axis=-1)
             self._pixel_buffer[index, ...] = rgb
         else:
-            self._pixel_buffer[index, :3] = rgb
+        '''
+
+        self._pixel_buffer[index, :value.shape[-1]] = rgb
     
         return self.auto_show()
 
 
     def next_value(self, value: PixelValue, color_mode: ColorMode | None = None) -> 'Neopixel':
         """Set the value for the next pixel in the iteration"""
-        return self.set_value(result := next(self), value=value, color_mode=color_mode)
+        return self.set_value(next(self), value=value, color_mode=color_mode)
 
     def fill(self, value: PixelValue, color_mode: ColorMode | None = None) -> 'Neopixel':
         """Fill all pixels with a given value"""
@@ -590,7 +588,7 @@ class Neopixel:
 
     def __next__(self) -> int:
         """ Iterate over the indices of the pixels. """
-        if self._index >= len(self):
+        if self._index >= self.num_pixels:
             self._index = 0
             raise StopIteration
         self._index += 1
@@ -651,7 +649,7 @@ class Neopixel:
     @property
     def num_pixels(self) -> int:
         """Get the number of pixels in the strip."""
-        return len(self)
+        return self._num_pixels
 
     @property
     def power_consumption(self) -> float:
