@@ -9,6 +9,7 @@ from every import Every # https://raw.githubusercontent.com/Hangover3832/every_t
 from random import random, randint
 from effects import Fire, Meteor
 from time import monotonic, sleep
+from PIL import Image
 
 
 try:
@@ -66,17 +67,10 @@ def test_custom_device():
                 print(f"Closing Neopixel device...")
     
 
-    Neopixel(num := 1000, color_mode=ColorMode.RGB).to(MyNeopixel(param1=1234, param2=5678)).set_value(0, np.random.rand(num, 4,).astype(np.float32))().close_()
-    """ 
-    equals to:
-        num = 1000
-        dev = MyNeopixel(param1=1234, param2=5678)
-        neo = Neopixel(num, color_mode=ColorMode.RGB)
-        neo.to(dev)
-        neo.set_value(0, np.random.rand(num, 4))
-        neo()
-        neo.close_()
-    """
+    neo =Neopixel(num := 1000, color_mode=ColorMode.RGB).to(MyNeopixel(param1=1234, param2=5678))
+    neo[:] = np.random.rand(num, 4).astype(np.float32)
+    neo().close_()
+
 
 
 def basic_tests():
@@ -99,9 +93,10 @@ def basic_tests():
     n2[0] = 1,0, 0.0, 0.0 # red
     n2[1] = 0.0, 1.0, 0.0 # green
     n2[2] = 0.0, 0.0, 1.0 # blue
-    n2.set_value(3, (0.0, 1.0, 1.0), color_mode=ColorMode.HSV) # red
-    n2.set_value(4, (0.333, 1.0, 1.0), color_mode=ColorMode.HSV) # green
-    n2.set_value(5, (0.666, 1.0, 1.0), color_mode=ColorMode.HSV) # blue
+    n2.color_mode = ColorMode.HSV
+    n2[3] = (0.0, 1.0, 1.0) # red
+    n2[4] = (0.333, 1.0, 1.0) # green
+    n2[5] = (0.666, 1.0, 1.0) # blue
     n2()
     print()
     print(n2[:])
@@ -116,12 +111,12 @@ def basic_tests():
         [0.3, 0.3,0.3]]
         )
 
-    n2[0] = a # broadcast to index 0
+    n2[0:3] = a # broadcast to index 0
     n2()
     print('\n', n2[:])
     print()
 
-    n2[7] = a # broadcast to index 7 (to the end)
+    n2[7:] = a # broadcast to index 7 (to the end)
     n2()
     print('\n', n2[:])
     print()
@@ -137,27 +132,8 @@ def basic_tests():
     except ValueError:
         print("Ok")
 
-
-    n2.create_gradient(0.0, 1.0) # create a gradient, but to the white pixels only
-    n2()
-    print('\n', n2[:])
-    print()
-
-    n1.create_gradient(0.0, 1.0) # create a gradient, but to the white pixels only
-    n1()
-    print('\nn1=', n1[:])
-    print()
-
-    print("Rainbow gradient:")
-    n1.clear().color_mode=ColorMode.HSV
-    start = [0.0, 1.0, 1.0]
-    end   = [1.0, 1.0, 1.0]
-    n1.create_gradient(from_value=start, to_value=end)
-    n1()
-    print('\n', n1[:])
-    n1.close_()
-    n2.close_()
-
+    n1.clear()().close_()
+    n2.clear()().close_()
 
 
 def ColorModeTest():
@@ -184,14 +160,13 @@ def ColorModeTest():
 
 def GammaTest() -> None:
 
-    neo = Neopixel(11, gamma_func=GAMMA['srgb'])
-    neo.to(neo1dev).clear()
-    neo.to(neo2dev).clear()
+    neo = Neopixel(20, gamma_func=GAMMA['srgb']).to(neo1dev).clear()
     # Create a brightness gradient
     #neo.create_gradient((0.0, 0.0, 0.0),(0.0, 0.0, 1.0)) # brightness gradient
     # neo.set_value([137, 149], (0.66, 1.0, 0.1))
     # neo.create_gradient(0., 1.0) # white LED gradient opposite ordered
-    neo.create_gradient((0.0, 0.0, 0.0), (0.0, 0.0, 1.0))
+    neo[0:10] = neo.create_gradient((0.1, 0.0, 0.0), (0.1, 0.0, 1.0), 10) # white using RGB LED's
+    neo[10:20] = neo.create_gradient(0.0, 1.0, 10) # using white LED's
 
     neo()
     print()
@@ -200,7 +175,9 @@ def GammaTest() -> None:
 
 
 def Rainbow(neo: Neopixel):
-  
+    
+    neo.color_mode = ColorMode.HSV
+
     @Every.every(0.5, n=neo) # note that the interval gets overriden in the function
     def drop(n:Neopixel):
         """Drop in some white pixels"""
@@ -216,9 +193,9 @@ def Rainbow(neo: Neopixel):
         # n[-1] = 0.0
 
     # Create a rainbow pattern in the default HSV space
-    neo.create_gradient([0.0, 1.0, 1.0], [1.0, 1.0, 1.0])
+    neo[:] = neo.create_gradient([0.0, 1.0, 1.0], [1.0, 1.0, 1.0], 150)
 
-    @Every.While(1) # repeat for 5s
+    @Every.While(5) # repeat for 5s
     def proceed():
         drop()
         roll()
@@ -232,17 +209,17 @@ def Raindrops(neo: Neopixel):
         # place a random colored pixel at a random location in a random interval
         index = randint(0, n.num_pixels-1) # random position
         hue = random() # a random color in HSV color space
-        n(index, (hue, 1.0, 1.0))
+        n[index] = (hue, 1.0, 1.0)
         drop.interval = random()/5
 
     @Every.every(1.0)
     def dropW(n:Neopixel):
         # place a white pixel at a random location every second
         index = randint(0, n.num_pixels-1) # random position
-        value = random() # a random color in HSV color space
-        n(index, value)
+        value = random() # random brightness
+        n[index] = value
 
-    @Every.While(1, n=neo) # repeat for 5s
+    @Every.While(5.0, n=neo) # repeat for 5s
     def proceed(n:Neopixel):
         drop(n)
         dropW(n)
@@ -253,13 +230,13 @@ def Raindrops(neo: Neopixel):
 
 
 def light_show():
-    neo = Neopixel(150).to(neo2dev)
+    neo = Neopixel(150).to(neo1dev)
 
-    @Every.While(5)
+    @Every.While(10)
     def loop():
         Rainbow(neo)
         Raindrops(neo)
-        neo2dev.reversed = not neo2dev.reversed
+        neo1dev.reversed = not neo2dev.reversed
 
     neo.close_()
 
@@ -281,9 +258,10 @@ def effects():
     neo1dev.brightness = 1.0
     neo1dev.gamma_function = GAMMA['srgb']
 
-    neo2dev.brightness = 0.2
-    neo2dev.gamma_function = GAMMA['gamma25']
-    neo = Neopixel(23, brightness=1., gamma_func=GAMMA['srgb'])
+    neo2dev.brightness = 1.0
+    neo2dev.gamma_function = GAMMA['srgb']
+
+    neo = Neopixel(23, brightness=1.0, gamma_func=GAMMA['srgb'])
     neo.to(neo1dev)
     neo.to(neo2dev)
 
@@ -301,7 +279,7 @@ def effects():
         roll_interval=0.025,
         shoot_intervall=1.5
         )
-    
+
 
     #@Every.While(10)
     #def run_effects():
@@ -314,73 +292,109 @@ def effects():
 
         neo.reversed = True
         meteor.resume()
-        Every.While(10)(meteor.progress) # drop for 10s
+        Every.While(1)(meteor.progress) # drop for 10s
         meteor.pause()
         Every.While(2)(meteor.progress) # settle for 1s
-
 
     print()
 
 
-
-def show_image():
-    """Show an image on the neopixel, assuming the pixels are aranged 32x8, line by line."""
-    from PIL import Image
-
-    neo = Neopixel(256, brightness=1.0) # This is a Neopixel screen 32x8
-    neo2dev.brightness = 0.1
-    neo.to(neo2dev)
-
-    console = ConsoleSimulationDevice()
-    console.split_lines = 8
-    neo.to(console)
-
-    img = Image.open('icon1.png')
-    neo.display_image(0*64, np.asarray(img), zigzag=1, transpose=True)
-
-    img = Image.open('icon2.png')
-    neo.display_image(1*64, np.asarray(img), zigzag=1, transpose=True)
-
-    img = Image.open('icon3.png')
-    neo.display_image(2*64, np.asarray(img), zigzag=1, transpose=True)
-
-    img = Image.open('icon4.png')
-    neo.display_image(3*64, np.asarray(img), zigzag=1, transpose=True)
-    neo()
+def pixel_array_test():
+    """Demo for a 32x8 pixel array.
+    The pixels are arranged column by column, wired in zigzag:
+    """
+    """
+    |┌┐┌┐┌┐┌┐┌┐┌┐┌┐┌┐┌┐┌┐┌┐┌┐┌┐┌┐┌┐|
+    ||||||||||||||||||||||||||||||||
+    ||||||||||||||||||||||||||||||||
+    ||||||||||||||||||||||||||||||||
+    ||||||||||||||||||||||||||||||||
+    ||||||||||||||||||||||||||||||||
+    ||||||||||||||||||||||||||||||||
+    └┘└┘└┘└┘└┘└┘└┘└┘└┘└┘└┘└┘└┘└┘└┘└┘
+    """
 
 
-def on_write(buffer: NDArray[np.float32]):
-    print("RGB", buffer)
-    return buffer
+    def on_write_buffer(buffer: NDArray):
+        """Before writing the buffer to the device, rearrange it to match the physical wiring."""
+        buffer = buffer.transpose(1, 0, 2) # rearrange the buffer to be row by row
+        buffer[1::2] = buffer[1::2][:, ::-1] # reverse every second row for zigzag wiring
+        return buffer
 
+    neo2dev.on_write_buffer = on_write_buffer
 
-def sclicing_test():
-    v = (0.666, 1.0, 0.5, 0.)
-    #neo2dev.on_write_buffer = on_write
     neo2dev.gamma_function = GAMMA['srgb']
-    neo = Neopixel((32, 8), color_mode=ColorMode.HSV, brightness=0.25)
-    print(neo.pixel_buffer.shape)
-    #neo.to(neo1dev)
+    neo = Neopixel((8, 32), color_mode=ColorMode.RGB, brightness=0.25, auto_write=True)
     neo.to(neo2dev)
+    #neo.to(neo1dev)
 
-    for i in range(8):
-        neo[i, 0:i+1] = v
 
-    neo[1::2] = neo[1::2][:, ::-1]
+    while True:
+        neo.color_mode = ColorMode.HSV
+        # create a rainbow on every row:
+        neo[:] = neo.create_gradient((0.0, 1.0, 1.0), (1.0, 1.0, 1.0), 32)
+        sleep(1)
+        # create a rainbow on every column:
+        neo[:, :] = neo.create_gradient((0.0, 1.0, 1.0), (1.0, 1.0, 1.0), 8).reshape(8, 1, 3)
+        sleep(1)
 
-    neo()
+        neo.color_mode = ColorMode.RGB
+        neo.begin_update()
+        neo.clear()
+        # Draw a colorful grid:
+        neo[:, 0]  = (0.0, 1.0, 0.0) # 1st column green
+        neo[:, 15] = (0.0, 0.0, 1.0) # middle column blue
+        neo[:, -1] = (1.0, 1.0, 0.0) # last column yellow
+        neo[0] = (1.0, 0.0, 0.0) # 1st row red
+        neo[-1] = (0.0, 1.0, 1.0) # last row cyan
+        neo.end_update()
+        sleep(1)
+
+        # Create random noise pattern:
+        neo[:] = np.random.rand(8, 32, 3).astype(np.float32)
+        sleep(1)
+
+        # Clear a rectangle in the middle:
+        neo[2:6, 10:22] = neo.blank
+        sleep(1)
+    
+        # Display a 8x8 image:
+        img = Image.open('icon1.png')
+        neo[0:8, 0:8] = np.asarray(img, dtype=np.float32) / 255.0
+        sleep(1)
+
+        # Display a 32x8 image:
+        img = Image.open('img_test.png')
+        neo[:] = np.asarray(img, dtype=np.float32) / 255.0
+        sleep(1)
+
+        for _ in range(8):
+            neo >>= 1 # roll along axis 0
+            sleep(0.1)
+
+        for _ in range(8):
+            neo <<= 1
+
+        for _ in range(32):
+            neo.roll(1, axis=1)
+
+        for _ in range(32):
+            neo.roll(-1, axis=1, value=neo.blank)
+
+
+def temperature_spectrum():
+    neo = Neopixel(23).to(neo2dev)
 
 
 if __name__ == "__main__":
     Neopixel(150).to(neo1dev).clear()().close_()
     Neopixel(256).to(neo2dev).clear()().close_()
 
-    #test_custom_device()
-    #basic_tests()
-    #show_image()
-    #GammaTest()
-    #ColorModeTest()
+    test_custom_device()
+    basic_tests()
+    GammaTest()
+    ColorModeTest()
     #power_measure()
     #light_show()
-    #effects()
-    sclicing_test()
+    effects()
+    # pixel_array_test()

@@ -37,6 +37,7 @@ class NeopixelDevice(ABC):
         self.brightness: float = 1.0
         self.gamma_function = gamma_function or (lambda x: x)
         self.on_write_buffer: Callable[[NDArray[np.float32]], NDArray[np.float32]] | None = None
+        self.on_write_to_device: Callable[[NDArray[np.float32]], NDArray[np.float32]] | None = None
         self.on_uint8: Callable[[NDArray[np.uint8]], NDArray[np.uint8]] | None = None
         self.on_uint32: Callable[[NDArray[np.uint32]], NDArray[np.uint32]] | None = None
 
@@ -51,7 +52,7 @@ class NeopixelDevice(ABC):
         :param device_data: Optional device-specific data from the Neopixel instance.
         :type device_data: Any
         """
-        raise NotImplementedError("Subclasses must implement write_to_device() method.")
+        return self.on_write_to_device(buffer) if self.on_write_to_device is not None else buffer
 
 
     def _write_buffer(self, buffer:NDArray[np.float32], device_data: Any) -> Any:
@@ -65,12 +66,12 @@ class NeopixelDevice(ABC):
         :returns: The result of the write_to_device() method.
         """
 
+        if self.on_write_buffer is not None:
+            buffer = self.on_write_buffer(buffer)
+
         #reduce the array to 2D if neccessary:
         buffer = buffer.reshape(-1, buffer.shape[-1])
         buffer = np.clip(self.brightness * self.gamma_function(buffer), 0.0, 1.0)
-
-        if self.on_write_buffer is not None:
-            buffer = self.on_write_buffer(buffer)
 
         watts = self.watts_per_led if self.pixel_order.has_W else np.append(self.watts_per_led[:3], 0.0)
         self._current_power = np.sum(watts * buffer).astype(float)
@@ -90,20 +91,22 @@ class NeopixelDevice(ABC):
 
     def _to_uint8(self, buffer:NDArray[np.float32]) -> NDArray[np.uint8]:
         """scale to [0, 255], and convert to 2D uint8"""
+        result = np.clip(np.round(255. * buffer), 0., 255.).astype(np.uint8)
         if self.on_uint8 is not None:
-            return self.on_uint8(np.clip(np.round(255. * buffer), 0., 255.).astype(np.uint8))
+            return self.on_uint8(result)
         else:
-            return np.clip(np.round(255. * buffer), 0., 255.).astype(np.uint8)
+            return result
 
 
     def _to_uint32(self, buffer:NDArray[np.float32]) -> NDArray[np.uint32]:
         """Convert the 2D buffer to 1D uint32."""
-        b = self._to_uint8(buffer).astype(np.uint32)
+        result = self._to_uint8(buffer).astype(np.uint32)
         shifts = np.array([24, 16, 8, 0], dtype=np.uint32) if self.pixel_order.num == 4 else np.array([16, 8, 0], dtype=np.uint32)
+        result = np.bitwise_or.reduce(result << shifts, axis=1, dtype=np.uint32)
         if self.on_uint32 is not None:
-            return self.on_uint32(np.bitwise_or.reduce(b << shifts, axis=1, dtype=np.uint32))
+            return self.on_uint32(result)
         else:
-            return np.bitwise_or.reduce(b << shifts, axis=1, dtype=np.uint32)
+            return result
 
 
     def open_(self, neopixel: Neopixel) -> Any:
@@ -224,7 +227,7 @@ class Neopixel:
             color_mode: ColorMode = ColorMode.HSV,
             brightness: float = 1.0, 
             auto_write: bool = False,
-            max_power: float = 0.0,
+            # max_power: float = 0.0,
             **kwargs,
                 ) -> None:
 
@@ -274,80 +277,6 @@ class Neopixel:
         return self
 
 
-    def add_virtual_screen(self, config: NDArray[np.uint16]) -> int:
-        """
-        Add a virtual 2 dimensional screen area to the Neopixel stripe.
-
-        :param config: A 2-dimensional array that contains all the pixel indices that bild up the screen,
-        mapping from the top left to the bottom right line by line on the virtual screen.
-        :type config: np.ndarray[[int, ...], ...]
-        :returns: The index number of the newly created screen.
-        :rtype: int
-        """
-
-        self._mini_screens.append(config)
-        return len(self._mini_screens)-1
-
-
-    def virtual_screen_data(self, screen_index: int, data: NDArray[np.float32], color_mode: ColorMode  | None = None) -> 'Neopixel':
-        """
-        Put pixel data onto a virtual screen.
-
-        :param index: The index of the virtuel screen created and returned by `add_virtual_screen()`.
-        :type index: int
-        :param data: A 3-dimensional array that contains RGB(W) Pixel values to put on the virtual screen.
-        Note that the shape of the `data` array must match the shape of the virtual screen.
-        :type data: np.ndarray[[[float, ...]]]
-        :returns: self
-        :rtype: Neopixel
-        """
-
-        assert data.shape[:2] == self._mini_screens[screen_index].shape
-        indices = self._mini_screens[screen_index].flatten()
-        data = data.reshape(-1, data.shape[2]).squeeze()
-
-        self.begin_update()
-        # no auto write in this loop
-        for d, i in enumerate(indices):
-            self.set_value(i, data[d], color_mode=color_mode)
-
-        return self.end_update()
-    
-
-    def display_image(self, index:int, image:NDArray[np.float32], zigzag:Literal[0, 1, 2], transpose:bool=False) -> 'Neopixel':
-        """
-        Displays an image on a rectangular Neopixel area. The image will be scaled to the `size` parameter
-        and then put on the stripe at `index` line by line (scanline).
-
-        :param index: Start index the image should appear
-        :type index: int
-        :param image: image to display: np.asarray(PIL.Image.Image)
-        :type image: np.NDArray[np.float32] (0..255)
-        :param zigzag: Set `zigzag` > 0 if the Neopixel area is connected in a zigzag scheme:
-            a value of 1 flips the odd, a 2 flips the even row numbers
-        :type zigzag: int[0, 1, 2]
-        :param transpose: Set `transpose` to True if the Neopixel area is arranged in columns
-        :type transpose: bool
-        :return: self
-        :rtype: Neopixel
-        """
-
-        img = image.copy()
-
-        if transpose:
-            img = img.transpose(1, 0, 2)
-
-        if zigzag == 1:
-            img[1::2] = img[1::2][:, ::-1]
-        elif zigzag == 2:
-            img[0::2] = img[0::2][:, ::-1]
-
-        # flatten the image data [h, w, rgb] uint8 to a 2D array [x, RGB] float32 of pixels:
-        img = img.reshape(-1, img.shape[-1]).astype(np.float32) / 255.0
-
-        return self.set_value(index, img, color_mode=ColorMode.RGB)
-
-
     def _write_buffer(self) -> None:
         """Write pixel data to the Neopixels device"""
 
@@ -362,14 +291,14 @@ class Neopixel:
         """Get the number of pixels in the strip."""
         return self._num_pixels
 
-
+    '''
     def set_temperature(self, index:PixelIndex, temperature:float, brightness:float = 1.0) -> 'Neopixel':
         """Set pixel value at index using an approximation for the black body heat radiation.
         The temperature ranges from [0.0 .. 1.0]"""
 
         self.pixel_buffer[index, :3] = np.clip(brightness * self._color_mode.kelvin_to_rgb(temperature), 0.0, 1.0)
         return self.auto_show()
-
+    '''
 
     def __setitem__(self, index, value: PixelValue) -> None:
         """Sliced Neopixel write"""
@@ -381,10 +310,17 @@ class Neopixel:
             # Set the white LED only
             self._pixel_buffer[*index, ..., 3] = float(value)
             return
-
+        
         value = np.asarray(value)
+
+        if value.shape and value.shape[-1] == 1:
+            self._pixel_buffer[*index, ..., 3:4] = value
+            self.auto_show()
+            return
+
         # Preserve the white LED if the value is [R, G, B] only
-        self._pixel_buffer[*index, ..., :len(value)] = self.color_mode.convert_to(value, ColorMode.RGB)
+        self._pixel_buffer[*index, ..., 0:value.shape[-1]] = self.color_mode.convert_to(value, ColorMode.RGB)
+        self.auto_show()
 
 
     def __getitem__(self, index) -> NDArray[np.float32]:
@@ -399,74 +335,16 @@ class Neopixel:
         return result
 
 
-    def set_value(self, index: PixelIndex, value: PixelValue, color_mode: ColorMode | None = None) -> 'Neopixel':
-        """
-        This is the core routine that writes pixel value at index to self.pixel_buffer.
-
-        :param index: Pixel index number(s)
-        :type index: int, slice, list, tuple
-        :param value: Pixel value. 
-            If value is a number, it affects the White LED only in a RGBW stripe. A non RGBW stripe, it will ignored in this case.
-        :type value: number or array like
-        :param color_mode: The color mode of the provided value. If None, the current color mode of the Neopixel instance is used.
-        :type color_mode: ColorMode | None
-        :returns: The current instance of Neopixel.
-        :rtype: Neopixel
-        """
-
-        value = np.clip(np.asarray(value, dtype=np.float32), 0.0, 1.0)
-
-        if value.ndim == 0:# a single number applies to the white LED only
-
-            #if not self.has_W:
-                #ignore if no white LED can be set
-            #    return self
-
-            self._pixel_buffer[index, 3] = np.clip(value, 0.0, 1.0).astype(float)
-            return self.auto_show()
-
-        if (value.shape[-1] == 2) or (value.shape[-1] > 4):
-            raise ValueError("Wrong number of values")
-
-        if (value.ndim == 2) and (isinstance(index, int)):
-            # If the value contains an array with multiple pixel values, we try to broadcast them to a slice in the buffer
-            index = slice(index, index+value.shape[0])
-
-        if value.shape[-1] == 1: # an array of single numbers is boradcasted to the white pixels only:
-            #if not self.has_W:
-                # ignore if no white LED is available
-            #    return self
-
-            self._pixel_buffer[index, 3] = value[:, 0]
-            return self.auto_show()
-
-        # The internal pixel buffer is held in ColorMode.RGB
-        rgb = (color_mode or self._color_mode).convert_to(value, ColorMode.RGB)
-
-        '''
-        if (value.shape[-1] > 3): # and self.has_W:
-            # Put back the white channel to the last dimension if RGBW
-            rgb = np.concatenate([rgb, value[..., 3][..., np.newaxis]], axis=-1)
-            self._pixel_buffer[index, ...] = rgb
-        else:
-        '''
-
-        self._pixel_buffer[index, :value.shape[-1]] = rgb
-    
+    def fill(self, value: PixelValue) -> 'Neopixel':
+        """Fill all pixels with a given value"""
+        self[:] = value
         return self.auto_show()
 
 
-    def next_value(self, value: PixelValue, color_mode: ColorMode | None = None) -> 'Neopixel':
-        """Set the value for the next pixel in the iteration"""
-        return self.set_value(next(self), value=value, color_mode=color_mode)
-
-    def fill(self, value: PixelValue, color_mode: ColorMode | None = None) -> 'Neopixel':
-        """Fill all pixels with a given value"""
-        return self.set_value(slice(None), value=value, color_mode=color_mode)
-
     def clear(self) -> 'Neopixel':
         """Clear all pixels by setting them to black."""
-        return self.fill(self.blank, color_mode=ColorMode.RGB)
+        return self.fill(self.blank)
+
 
     def auto_show(self) -> 'Neopixel':
         """In auto write mode, show the current pixel buffer if the update counter is 0"""
@@ -478,7 +356,7 @@ class Neopixel:
         return self
 
 
-    def roll(self, shift: int = 1, value: PixelValue | None = None) -> 'Neopixel':
+    def roll(self, shift:int= 1, axis:int=0, value:PixelValue| None = None) -> 'Neopixel':
         """
         Roll the pixel buffer by the specified shift amount.
         
@@ -493,44 +371,36 @@ class Neopixel:
         if shift == 0:
             return self
         
-        if value is None:
-            self._pixel_buffer = np.roll(self.pixel_buffer, shift, axis=0)
-            return self.auto_show()
-        else:
-            if not isinstance(value, (float, int)):
-                value = np.asarray(value)
+        self._pixel_buffer = np.roll(self.pixel_buffer, shift, axis=axis)
 
+        if value is not None:
+            slc = [slice(None, None, None) for _ in range(axis)]
             if shift > 0:
-                self.pixel_buffer[shift:] = self.pixel_buffer[:-shift]
-                return self.set_value(slice(None,shift), value)
+                slc.append(slice(None, shift, None))
             else:
-                self.pixel_buffer[:shift] = self.pixel_buffer[-shift:]
-                return self.set_value(slice(shift, None), value)
+                slc.append(slice(shift, None, None))
+
+            self[tuple(slc)] = value
+
+        return self.auto_show()
 
 
     def create_gradient(self, 
                         from_value:PixelValue, 
                         to_value:PixelValue, 
-                        index:int=0, 
-                        count:int=0, 
-                        color_mode:ColorMode | None = None) -> 'Neopixel':
+                        count:int) -> NDArray[np.float32]:
         
         """
-        Create a color gradient from `from_value` to `to_value` starting at `index` for `count` pixels.
-        If `count` is 0, the gradient will fill up to the end of the pixel strip.
+        Create a color gradient from `from_value` to `to_value` for `count` pixels.
 
         :param from_value: The starting color value of the gradient.
         :type from_value: PixelValue
         :param to_value: The ending color value of the gradient.
         :type to_value: PixelValue
-        :param index: The starting index for the gradient. Defaults to 0.
-        :type index: int
         :param count: The number of pixels to fill with the gradient. If 0, fills to the end of the strip. Defaults to 0.
         :type count: int
-        :param color_mode: The color mode of the provided values. If None, the current color mode of the Neopixel instance is used.
-        :type color_mode: ColorMode | None
-        :returns: The current instance of Neopixel.
-        :rtype: Neopixel
+        :returns: The color gradient array
+        :rtype: NDArray[np.float32]
         """
 
         from_value = np.asarray(from_value, dtype=np.float32)
@@ -548,51 +418,23 @@ class Neopixel:
                 np.linspace(from_value[1], to_value[1], count),
                 np.linspace(from_value[2], to_value[2], count)]
 
-            #if self.has_W:
             if from_value.shape[0] > 3:
                 rgb.append(np.linspace(from_value[3], to_value[3], count))
 
-            gradient = np.stack(rgb, axis=1, dtype=np.float32)
-        else: # W only value array
-            gradient = np.linspace(from_value, to_value, count)[:, np.newaxis].astype(np.float32)
+            return np.stack(rgb, axis=1, dtype=np.float32)
 
-        return self.set_value(index, gradient[:self.num_pixels-index], color_mode=color_mode)
+        else: # W only value array
+            return np.linspace(from_value, to_value, count)[:, np.newaxis].astype(np.float32)
+
 
 
     # __dunder__ methods =============================
-    def __call__(self, index: PixelIndex | None = None, value: PixelValue | None = None) -> 'Neopixel':
+    def __call__(self) -> 'Neopixel':
         """
-        Calls `show()` that updates the stripe if no index or value is provided. If index is provided but no value,
-        the pixel(s) at index gets cleared. If both index and value are provided, the pixel
-        at index is set to the specified value.
-
-        :param index: Pixel index number(s)
-        :type index: int or slice
-        :param value: Pixel value. 
-            If value is a number, it affects the White LED only in a RGBW stripe. A non RGBW stripe
-            will throw an exception in this case.
-        :type value: number or array like
+        Calls `show()` that updates the stripe.
         """
+        return self.show()
 
-        if index is None:
-            return self.show()
-
-        if value is None:
-            return self.set_value(index, self.blank)
-
-        return self.set_value(index, value)
-
-
-    def __iter__(self) -> 'Neopixel':
-        return self
-
-    def __next__(self) -> int:
-        """ Iterate over the indices of the pixels. """
-        if self._index >= self.num_pixels:
-            self._index = 0
-            raise StopIteration
-        self._index += 1
-        return self._index - 1
 
     def __iadd__(self, value: np.ndarray | float) -> 'Neopixel':
         """Add value to the pixel buffer in RGB space, e.g. pixels += 0.1"""

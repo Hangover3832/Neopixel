@@ -55,6 +55,7 @@ class Fire(NeopixelEffect):
         self.spectrum = spectrum
         self.decay_factor = decay_factor
         self.spark_interval_factor = spark_interval_factor
+        self.neopixel.color_mode = ColorMode.RGB
         neopixel.auto_write = True
         self.index = 0
         self.start = 0
@@ -96,8 +97,7 @@ class Fire(NeopixelEffect):
     def _propagate(self) -> None:
         if self.start <= self.index < self.end:
             self._propagating = True
-            self.neopixel.set_temperature(self.index, 
-                     self.get_indexed_temp(self.index), self._bright)
+            self.neopixel[self.index] =  ColorMode.kelvin_to_rgb(self.get_indexed_temp(self.index))
             self.index += 1
         else:
             self._propagating = False
@@ -108,8 +108,8 @@ class Fire(NeopixelEffect):
         self.neopixel *= self._decay_array
 
     def show_temperature_gradient(self) -> None:
-        for i in self.neopixel:
-            self.neopixel.set_temperature(i, self.get_indexed_temp(i))
+        for i in range(self.neopixel.num_pixels):
+            self.neopixel[i] = self.get_indexed_temp(i)
 
 
     def progress(self) -> 'Fire':
@@ -166,3 +166,4 @@ class Meteor(NeopixelEffect):
         self.neopixel.clear()
         self.shoot.reset().resume().execute()
         return self
+

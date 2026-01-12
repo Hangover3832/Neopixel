@@ -66,8 +66,7 @@ class SPIDevice(NeopixelDevice):
         :type device_data: np.ndarray[np.uint8]
         :raises ValueError: If device_data is None
         """
-
-        rgb_buffer = self._to_uint32(buffer)
+        rgb_buffer = self._to_uint32(super().write_to_device(buffer, device_data))
 
         # shift out 2 bits of each pixel and encode them to a byte for SPI transmission:
         for i in range(self._double_bits_per_pixel):
@@ -108,7 +107,7 @@ class ConsoleSimulationDevice(NeopixelDevice):
 
     def write_to_device(self, buffer:NDArray[np.float32], device_data: None) -> Any:
         print('', end='\r')
-        for i, value in enumerate(self._to_uint8(buffer), start=1):
+        for i, value in enumerate(self._to_uint8(super().write_to_device(buffer, device_data)), start=1):
             g, r, b = value[:3]
             w = value[3] if len(value) > 3 else 0
             if self.inverse:
@@ -146,8 +145,6 @@ class ConsoleSPISimulationDevice(SPIDevice):
         print()
 
     def write_to_device(self, buffer:NDArray[np.float32], device_data: NDArray[np.uint8]) -> Any:
-        super().write_to_device(buffer, device_data)
- 
         if device_data is None:
             raise ValueError("ConsoleSPISimulationDevice requires device_data to be passed")
 
