@@ -2,7 +2,7 @@ from enum import Enum
 from typing import Any, Callable
 from numpy.typing import NDArray
 import numpy as np
-from neopixel_classes import NeopixelDevice, Neopixel
+from neopixel_classes import NeopixelDevice, Neopixel, Callable_uint8
 from colors import PixelOrder
 import tkinter as tk
 
@@ -38,8 +38,9 @@ class SPIDevice(NeopixelDevice):
     SPI_LOW_BIT2   = 0x08
 
     def __init__(self, *, pixel_order:PixelOrder=PixelOrder.GRB, gamma_function: Callable | None = None, **kwargs) -> None:
-
         super().__init__(pixel_order=pixel_order, gamma_function=gamma_function, **kwargs)
+
+        self.on_spi_buffer_ready: Callable_uint8 | None = None
 
         if self._pixel_order.num == 4:
             self._double_bits_per_pixel = 16
@@ -52,9 +53,14 @@ class SPIDevice(NeopixelDevice):
 
 
     def open_(self, neopixel:Neopixel) -> NDArray[np.uint8]:
-        """Open device and create SPI buffer to be stored in Neopixel instance."""
+        """Open device and pre-allocate the SPI buffer to be stored in Neopixel instance."""
         super().open_(neopixel)
-        return np.zeros([self._double_bits_per_pixel, self._num_pixels], dtype=np.uint8)
+        return np.zeros([self._double_bits_per_pixel, self.num_pixels], dtype=np.uint8)
+    
+
+    def close_(self) -> Any:
+        self.on_spi_buffer_ready = None
+        return super().close_()
 
 
     def write_to_device(self, buffer: NDArray[np.float32], device_data: NDArray[np.uint8]) -> Any:
@@ -66,7 +72,7 @@ class SPIDevice(NeopixelDevice):
         :type device_data: np.ndarray[np.uint8]
         :raises ValueError: If device_data is None
         """
-        rgb_buffer = self._to_uint32(super().write_to_device(buffer, device_data))
+        rgb_buffer = self._to_uint32(buffer)
 
         # shift out 2 bits of each pixel and encode them to a byte for SPI transmission:
         for i in range(self._double_bits_per_pixel):
@@ -82,6 +88,8 @@ class SPIDevice(NeopixelDevice):
                     ).astype(np.uint8)
 
         # device_data is now ready to be used by a child class
+        if self.on_spi_buffer_ready is not None:
+            device_data = self.on_spi_buffer_ready(device_data)
 
 
 #-----------------------------------------------------------
@@ -107,7 +115,7 @@ class ConsoleSimulationDevice(NeopixelDevice):
 
     def write_to_device(self, buffer:NDArray[np.float32], device_data: None) -> Any:
         print('', end='\r')
-        for i, value in enumerate(self._to_uint8(super().write_to_device(buffer, device_data)), start=1):
+        for i, value in enumerate(self._to_uint8(buffer), start=1):
             g, r, b = value[:3]
             w = value[3] if len(value) > 3 else 0
             if self.inverse:

@@ -44,22 +44,29 @@ class ColorMode(Enum):
     # HLS = auto() # implement hls_to_rgb() and rgb_to_hls() first
 
     @classmethod
-    def kelvin_to_rgb(cls, kelvin: float) -> np.ndarray:
-        return np.array(temperature_to_RGB(kelvin))
+    def kelvin_to_rgb(cls, kelvin: float) -> NDArray[np.float32]:
+        return np.array([*temperature_to_RGB(kelvin), 0.0])
 
-    def convert_to(self, value: NDArray[np.float32], to_mode:'ColorMode') -> NDArray[np.float32]:
+    def convert_to(self, value: NDArray[np.float32] | int | float, to_mode:'ColorMode') -> NDArray[np.float32] | float:
         """
         Convert color value from this color mode to the specified color mode.
         Note that the color conversion function mode_to_mode() must be globally avilable.
+        A single number as well as shape[-1] == 1 is not converted.
 
         :param value: The color value to be converted.
         :type value: np.ndarray
         :param to_mode: The target color mode.
         :type to_mode: ColorMode
         :return: The converted color value.
-        :rtype: np.ndarray"""
+        :rtype: np.ndarray | float"""
 
         if self == to_mode:
+            return value
+
+        if isinstance(value, (float, int)):
+            return float(value)
+        
+        if value.shape[-1] == 1:
             return value
 
         convert_function = f"{self.name.lower()}_to_{to_mode.name.lower()}"

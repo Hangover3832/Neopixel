@@ -81,9 +81,8 @@ class Fire(NeopixelEffect):
         """Return the color temperature based on the pixel index.
         We use only a part of the spectrum,  at the bottom hotter (more blueish)
         at the top colder (more redish) based on the self.spectrum parameter"""
-        x = index / (self.neopixel.num_pixels-1)
-        result = 0.1*random() + float(np.interp(x, (0.0, 1.0), self.spectrum))
-        return result
+        x = max(index / (self.neopixel.num_pixels-1), 0.0)
+        return 0.1*random() + float(np.interp(np.sqrt(x), (0.0, 1.0), self.spectrum))
 
 
     def _ignite_spark(self) -> None:
@@ -97,7 +96,8 @@ class Fire(NeopixelEffect):
     def _propagate(self) -> None:
         if self.start <= self.index < self.end:
             self._propagating = True
-            self.neopixel[self.index] =  ColorMode.kelvin_to_rgb(self.get_indexed_temp(self.index))
+            #self.neopixel.set_temperature(self.index, self.get_indexed_temp(self.index), self._bright)
+            self.neopixel.RGB[self.index] = ColorMode.kelvin_to_rgb(self.get_indexed_temp(self.index)) * self._bright
             self.index += 1
         else:
             self._propagating = False
@@ -109,7 +109,7 @@ class Fire(NeopixelEffect):
 
     def show_temperature_gradient(self) -> None:
         for i in range(self.neopixel.num_pixels):
-            self.neopixel[i] = self.get_indexed_temp(i)
+            self.neopixel.RGB[i] = ColorMode.kelvin_to_rgb(self.get_indexed_temp(i))
 
 
     def progress(self) -> 'Fire':
@@ -141,7 +141,7 @@ class Meteor(NeopixelEffect):
         super().__init__(neopixel)
         neopixel.auto_write = True
         neopixel.color_mode = ColorMode.HSV
-        neopixel.reversed = True
+        neopixel.reversed = False
         self.decay_value = decay_value
         self.shoot:Every = Every(shoot_intervall * neopixel.num_pixels * roll_interval, execute_immediately=True, keep_interval=False).do(self._shoot)
         self.roll:Every = Every(roll_interval, keep_interval=False).do(self._roll)
@@ -151,7 +151,8 @@ class Meteor(NeopixelEffect):
         self.neopixel[0] = random(), 1.0, 1.0
 
     def _roll(self) -> None:
-        self.neopixel.roll(value=self.neopixel[0] * np.array([1., 1., self.decay_value, 1.0], dtype=np.float32))
+        # self.neopixel.roll(value=self.neopixel[0] * np.array([1., 1., self.decay_value, 1.0], dtype=np.float32))
+        self.neopixel.roll[:] = self.neopixel[0] * np.array([1., 1., self.decay_value, 1.0], dtype=np.float32)
 
     def progress(self) -> 'Meteor':
         self.shoot()

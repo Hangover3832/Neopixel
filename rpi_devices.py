@@ -30,8 +30,6 @@ class RpiSpiDev(SPIDevice):
         else:
             self._cs = None
 
-        # self._spi_buffer: NDArray[np.uint8] | None = None
-
         # Setup SPI:
         try:
             self._spi = SpiDev()
@@ -50,10 +48,13 @@ class RpiSpiDev(SPIDevice):
     def write_to_device(self, buffer: NDArray[np.float32], device_data: NDArray[np.uint8] | None = None) -> Any:
         """Write pixel data to SPI device."""
         assert device_data is not None, "RpiSpiDev requires device_data (spi_buffer) to be passed from Neopixel._write_buffer()"
+
+        super().write_to_device(buffer=buffer, device_data=device_data)
+
         if self._cs is not None:
             self._cs.on()
-        super().write_to_device(buffer, device_data)
-        if self._cs is not None:
-            self._cs.off()
 
         self._spi.writebytes2(device_data.T.flatten())
+
+        if self._cs is not None:
+            self._cs.off()
