@@ -6,9 +6,9 @@ A lightweight Python library for driving and simulating Neopixel / WS281x-style 
 
 - Simple `Neopixel` device abstraction and buffer helpers.
 - Multiple device backends and simulations (SPI, RPi SPI, console simulation).
-- Color utilities and conversions for common color spaces (RGB and HSV are currently implemented).
+- Color utilities and conversions for common color spaces (RGB, HSV, and HLS are currently implemented).
 - Built-in effects (Fire, Meteor, etc.) and a test/demo harness.
-- Supports multi dimensional pixel arrangements like 2D display area or 3D volumetric display or even higher dimensions.
+- Supports multi-dimensional pixel arrangements like 2D display areas, 3D volumetric displays, or even higher dimensions.
 
 ## Requirements
 
@@ -50,9 +50,9 @@ dev = ConsoleSimulationDevice()
 np.to(dev)  # attach the device
 
 # Write pixels (values are floats in range 0.0..1.0) and push to the device
-np.fill((0.0, 1.0, 1.0))  # fill red in HSV color space
-#or
-np.RGB[:] = (0.0, 0.0, 1.0) # fill blue in RGB color space
+np.fill((0.0, 1.0, 1.0))  # fill cyan in HSV color space
+# or
+np.RGB[:] = (0.0, 0.0, 1.0)  # fill blue in RGB color space
 np.show()
 ```
 
@@ -67,7 +67,7 @@ from neopixel_classes import Neopixel
 from devices import ConsoleSimulationDevice
 from colors import ColorMode
 
-np = Neopixel(30, color_mode=ColorMode.RGB, auto_write=False).to(ConsoleSimulationDevice)
+np = Neopixel(30, color_mode=ColorMode.RGB, auto_write=False).to(ConsoleSimulationDevice())
 np.fill((0.2, 0.0, 0.8))  # purple-ish (floats 0..1)
 np.show()
 ```
@@ -101,6 +101,7 @@ np.end_update()  # triggers a single update/show when done
 ```
 
 - Multi-dimensional pixel arrays:
+
 ```python
 from neopixel_classes import Neopixel
 from rpi_devices import RpiSpiDev
@@ -109,23 +110,22 @@ from PIL import Image
 
 # create 4 quadratic areas, 8x8 each on a 256 pixel stripe
 # stacked on top of each other will build a volumetric display
-np = Neopixel((4, 8, 8), color_mode=ColorMode.RGB)
-dev = RpiSpiDev(device=0), gamma_function=GAMMA['srgb'])  # device 0 or 1, use sRGB gamma correction
-np.to(dev)
-np[0] = 0.0, 0.0, 1.0  # 1st area blue
-np[1] = 1.0, 0.0, 0.0  # 2nd area red
-np[2] = 0.0, 1.0, 0.0  # 3rd area green
-np[3] = Image.opem('image.png') # 4th area display a PIL Image, it will be resized to 8x8 autmatically
-np() # or np.show()
+neo = Neopixel((4, 8, 8), color_mode=ColorMode.RGB)
+dev = RpiSpiDev(device=0, gamma_function=GAMMA['srgb'])  # device 0 or 1, use sRGB gamma correction
+neo.to(dev)
+neo[0] = (0.0, 0.0, 1.0)  # 1st area blue
+neo[1] = (1.0, 0.0, 0.0)  # 2nd area red
+neo[2] = (0.0, 1.0, 0.0)  # 3rd area green
+neo[3] = Image.open('image.png')  # 4th area displays a PIL Image, it will be resized to 8x8 automatically
+neo()  # or neo.show()
 
-# vertical rainbow on area 1
-neo.HSV.F[0] = neo.create_gradient((0,1,1), (1,1,1), 64)
-np()
+# vertical rainbow on area 0
+neo.HSV.F[0] = neo.create_gradient((0, 1, 1), (1, 1, 1), 64)
+neo()
 
-# horizontal rainbow on area 3
-neo.HSV.T.F[2] = neo.create_gradient((0,1,1), (1,1,1), 64)
-np()
-
+# horizontal rainbow on area 2
+neo.HSV.T.F[2] = neo.create_gradient((0, 1, 1), (1, 1, 1), 64)
+neo()
 ```
 
 - Using built-in effects:
@@ -168,45 +168,41 @@ Key modules and where to look:
 ```python
 from neopixel_classes import NeopixelDevice
 
-class CustomDevice(NeopixelDevice)
+class CustomDevice(NeopixelDevice):
 
-    def __init__(self, *, 
-            pixel_order:PixelOrder=PixelOrder.GRB, 
-            gamma_function: Callable | None = None, 
+    def __init__(self, *,
+            pixel_order: PixelOrder = PixelOrder.GRB,
+            gamma_function: Callable | None = None,
             **kwargs
             ) -> None:
         super().__init__(pixel_order=pixel_order, gamma_function=gamma_function, **kwargs)
         # do your stuff here to initialize the device, allocating buffer etc
 
-
-    def open_(self, neopixel:Neopixel) -> Any:
-        """Open the device."""
+    def open_(self, neopixel: Neopixel) -> Any:
+        """Open the device and return device-specific data."""
         super().open_(neopixel)
-        device_data = "any desired data will be stored in the Neopixel instance and gets passed to the write_methods"
+        # store any desired data to be passed to write_to_device()
         return device_data
-
 
     def close_(self) -> Any:
         """Close the Neopixel device. Override this method in subclasses to implement device-specific closing logic."""
         return super().close_()
 
-
-    def _write_buffer(self, buffer:NDArray[np.float32], device_data: Any) -> Any:
-        """This would be the right place to modify the pixel buffer in its initial shape before it gets flattened and written to the device. You do not need to override this method if this is not neccessary."""
+    def _write_buffer(self, buffer: NDArray[np.float32], device_data: Any) -> Any:
+        """Modify the pixel buffer in its initial shape before it gets flattened and written to the device.
+        You do not need to override this method if this is not necessary."""
         return super()._write_buffer(buffer, device_data)
 
-
-    def write_to_device(self, buffer:NDArray[np.float32], device_data: Any) -> Any:
+    def write_to_device(self, buffer: NDArray[np.float32], device_data: Any) -> Any:
         """Write the given buffer to the Neopixel device.
         Override this method in subclasses to implement device-specific writing logic.
 
         :param buffer: A 2D array of shape (num_pixels, num_channels=4) containing pixel values.
         :type buffer: np.ndarray[float32]
-        :param device_data: Optional device-specific data from the Neopixel instance.
+        :param device_data: Optional device-specific data from the Neopixel instance (returned from open_).
         :type device_data: Any
         """
-        # implement your logic to write the data to you device
-
+        # implement your logic to write the data to your device
 ```
 
 ## Contributing
