@@ -21,9 +21,9 @@ class SPIDevice(NeopixelDevice):
     The actual SPI transmission must be implemented by child classes.
 
     1 SPI byte encodes 2 bits of pixel data:
-        '10' -> 0xC0
+        '10' -> 0xC8
         '11' -> 0xCC
-        '00' -> 0x80
+        '00' -> 0x88
         '01' -> 0x8C
     
     1 pixel = 8 bits per color channel
@@ -155,6 +155,9 @@ class ConsoleSPISimulationDevice(SPIDevice):
     def write_to_device(self, buffer:NDArray[np.float32], device_data: NDArray[np.uint8]) -> Any:
         if device_data is None:
             raise ValueError("ConsoleSPISimulationDevice requires device_data to be passed")
+
+        # Encode pixel buffer to SPI byte patterns (parent)
+        super().write_to_device(buffer, device_data)
 
         def convert(bits: np.ndarray) -> int:
             # bits = np.ndarray[uint8, uitn8, uint8, uint8] = 4 double bits = 8 bits = 1 byte

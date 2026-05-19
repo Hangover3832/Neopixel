@@ -3,7 +3,7 @@ import numpy as np
 from numpy.typing import NDArray
 from numpy.polynomial import Polynomial as Poly
 from enum import Enum, auto
-from color_conversions import rgb_to_hsv, hsv_to_rgb, yiq_to_rgb, temperature_to_RGB
+from color_conversions import rgb_to_hsv, hsv_to_rgb, rgb_to_hls, hls_to_rgb, yiq_to_rgb, temperature_to_RGB
 
 
 SOME_COLORS = {
@@ -40,8 +40,8 @@ def create_gamma_function(values_out:np.ndarray, values_in:np.ndarray | None = N
 class ColorMode(Enum):
     RGB = auto()
     HSV = auto()
+    HLS = auto()
     # YIQ = auto() # implement yiq_to_rgb() and rgb_to_yiq() first
-    # HLS = auto() # implement hls_to_rgb() and rgb_to_hls() first
 
     @classmethod
     def kelvin_to_rgb(cls, kelvin: float) -> NDArray[np.float32]:

@@ -107,11 +107,110 @@ def hsv_to_rgb(hsv: np.ndarray | tuple | list) -> np.ndarray:
     result = np.stack([r, g, b], axis=-1)
     return result
 
-def rgb_to_hls(rgb: np.ndarray) -> np.ndarray:
-    raise NotImplementedError
+def rgb_to_hls(rgb: np.ndarray | list | tuple) -> np.ndarray:
+    """
+    Convert an RGB numpy array to an HLS numpy array.
 
-def hls_to_rgb(hls: np.ndarray) -> np.ndarray:
-    raise NotImplementedError
+    :param rgb: Input array of shape (..., 3) with RGB values in range [0, 1].
+    :type rgb: numpy.ndarray
+    :return: Output array of shape (..., 3) with HLS values in ranges:
+        H: [0, 1], L: [0, 1], S: [0, 1]
+    :rtype: numpy.ndarray
+    """
+
+    # Ensure the input is a numpy array and in the correct shape
+    rgb = np.asarray(rgb, dtype=np.float32)[..., :3]
+    r, g, b = rgb[..., 0], rgb[..., 1], rgb[..., 2]
+
+    np_err = np.seterr(invalid='ignore')
+    maxc = np.max(rgb, axis=-1)
+    minc = np.min(rgb, axis=-1)
+
+    # Lightness
+    l = (maxc + minc) / 2.0
+
+    # Saturation
+    diff = maxc - minc
+    s = np.where(
+        (l <= 0.5),
+        np.where(maxc == 0.0, 0.0, diff / (maxc + minc + 1e-12)),
+        np.where(maxc == 0.0, 0.0, diff / (2.0 - maxc - minc + 1e-12))
+    )
+
+    # Compute Hue (H) — same logic as rgb_to_hsv
+    rc = np.where(maxc == minc, 0.0, (maxc - r) / (maxc - minc))
+    gc = np.where(maxc == minc, 0.0, (maxc - g) / (maxc - minc))
+    bc = np.where(maxc == minc, 0.0, (maxc - b) / (maxc - minc))
+
+    h = np.where(maxc == minc, 0,
+                 np.where(r == maxc, bc - gc,
+                 np.where(g == maxc, 2.0 + rc - bc,
+                 4.0 + gc - rc)))
+
+    h = (h / 6.0) % 1.0
+    np.seterr(**np_err)
+
+    # Stack HLS components
+    hls = np.stack([h, l, s], axis=-1)
+
+    return hls
+
+
+def hls_to_rgb(hls: np.ndarray | tuple | list) -> np.ndarray:
+    """
+    Convert an HLS numpy array to an RGB numpy array.
+
+    :param hls: Input array of shape (..., 3) with HLS values in ranges:
+        H: [0, 1], L: [0, 1], S: [0, 1].
+    :type hls: numpy.ndarray
+    :return: Output array of shape (..., 3) with RGB values in range [0, 1].
+    :rtype: numpy.ndarray
+    """
+
+    hls = np.asarray(hls, dtype=np.float32)[..., :3]
+    h, l, s = hls[..., 0], hls[..., 1], hls[..., 2]
+
+    # Handle achromatic case (saturation == 0 → gray)
+    if np.all(s == 0):
+        return np.stack([l, l, l], axis=-1)
+
+    # Chromatic case
+    c = (1.0 - np.abs(2.0 * l - 1.0)) * s  # chroma
+    x = c * (1.0 - np.abs((h * 6.0) % 2.0 - 1.0))
+    m = l - c / 2.0  # match
+
+    rp = np.zeros_like(h)
+    gp = np.zeros_like(h)
+    bp = np.zeros_like(h)
+
+    h6 = h * 6.0
+    mask0 = (h6 >= 0) & (h6 < 1)
+    mask1 = (h6 >= 1) & (h6 < 2)
+    mask2 = (h6 >= 2) & (h6 < 3)
+    mask3 = (h6 >= 3) & (h6 < 4)
+    mask4 = (h6 >= 4) & (h6 < 5)
+    mask5 = (h6 >= 5) & (h6 <= 6)
+
+    # Sector 0: R=C, G=X, B=0
+    rp[mask0] = c[mask0]; gp[mask0] = x[mask0]; bp[mask0] = 0.0
+    # Sector 1: R=X, G=C, B=0
+    rp[mask1] = x[mask1]; gp[mask1] = c[mask1]; bp[mask1] = 0.0
+    # Sector 2: R=0, G=C, B=X
+    rp[mask2] = 0.0;      gp[mask2] = c[mask2]; bp[mask2] = x[mask2]
+    # Sector 3: R=0, G=X, B=C
+    rp[mask3] = 0.0;      gp[mask3] = x[mask3]; bp[mask3] = c[mask3]
+    # Sector 4: R=X, G=0, B=C
+    rp[mask4] = x[mask4]; gp[mask4] = 0.0;      bp[mask4] = c[mask4]
+    # Sector 5: R=C, G=0, B=X
+    rp[mask5] = c[mask5]; gp[mask5] = 0.0;      bp[mask5] = x[mask5]
+
+    r = rp + m
+    g = gp + m
+    b = bp + m
+
+    result = np.stack([r, g, b], axis=-1)
+    return result
+
 
 def rgb_to_yiq(rgb: np.ndarray) -> np.ndarray:
     raise NotImplementedError
@@ -150,6 +249,35 @@ def run_test():
     print(f"should be RGB green [0,1,0]: {hsv_to_rgb((1.0/3, 1.0, 1.0))}")
     print(f"should be RGB blue  [0,0,1]: {hsv_to_rgb((2.0/3, 1.0, 1.0))}")
     print(f"should be HSV white [x,0,1]: {rgb_to_hsv((1.0, 1.0, 1.0))}")
+
+    # HLS roundtrip tests
+    print("\n--- HLS roundtrip tests ---")
+    for i, (name, color) in enumerate(SOME_COLORS.items()):
+        hls = rgb_to_hls(color[:3])
+        rgb = hls_to_rgb(hls)
+        print(f"[{i:2}] {name:<10} RGB {np.round(color, 3)}")
+        print(f"[{i:2}] {'HLS':<10}   {np.round(hls, 3)}")
+        print(f"[{i:2}] {'RGB':<10}   {np.round(rgb, 3)}")
+        print()
+
+    # HLS buffer test
+    buffer = np.vstack(list(SOME_COLORS.values()))[..., :3]
+    print(f"HLS Color buffer:\n{np.round(buffer, 3)}")
+    buffer = rgb_to_hls(buffer)
+    print(f"to HLS:\n{np.round(buffer, 3)}")
+    buffer = hls_to_rgb(buffer)
+    print(f"back to RGB:\n{np.round(buffer, 3)}")
+    print()
+
+    # HLS edge cases
+    print("--- HLS edge cases ---")
+    print(f"Black  [0,0,0] -> HLS: {rgb_to_hls([0., 0., 0.])}")
+    print(f"White  [1,1,1] -> HLS: {rgb_to_hls([1., 1., 1.])}")
+    print(f"Gray   [0.5,0.5,0.5] -> HLS: {rgb_to_hls([0.5, 0.5, 0.5])}")
+    print(f"Black  -> RGB: {hls_to_rgb([0.0, 0.0, 0.0])}")
+    print(f"White  -> RGB: {hls_to_rgb([0.0, 1.0, 0.0])}")
+    print(f"Gray   -> RGB: {hls_to_rgb([0.0, 0.5, 0.0])}")
+    print()
 
     print(f"Temperature to RGB  at 0.0 : {temperature_to_RGB(0.0)}")
     print(f"Temperature to RGB  at 1/3 : {temperature_to_RGB(1.0/3)}")
